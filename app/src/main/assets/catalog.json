@@ -1,0 +1,127 @@
+{
+  "version": 2,
+  "categories": [
+    {
+      "name": "Recon",
+      "tools": [
+        {
+          "name": "nmap",
+          "desc": "Scan reseau / ports / services",
+          "actions": [
+            { "label": "Services (-sV)", "cmd": "nmap -sV {T}" },
+            { "label": "Scripts defaut (-sC)", "cmd": "nmap -sC {T}" },
+            { "label": "Ping sweep (-sn)", "cmd": "nmap -sn {T}" },
+            { "label": "Quick (-T4 -F)", "cmd": "nmap -T4 -F {T}" },
+            { "label": "Full (-sV -sC -p-)", "cmd": "nmap -sV -sC -p- {T}" },
+            { "label": "Vuln (--script vuln)", "cmd": "nmap -sV --script vuln {T}" },
+            { "label": "Perso", "cmd": "nmap {OPTS} {T}", "params": [ { "name": "OPTS", "hint": "options nmap", "default": "-A" } ] }
+          ]
+        },
+        {
+          "name": "hote",
+          "desc": "Infos du chroot / identite",
+          "actions": [
+            { "label": "id + uname", "cmd": "id; uname -a" },
+            { "label": "ip", "cmd": "ip -brief addr 2>/dev/null || ifconfig" }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Web",
+      "tools": [
+        {
+          "name": "nikto",
+          "desc": "Scanner de vulns serveur web",
+          "actions": [
+            { "label": "Installer", "cmd": "apt install -y nikto" },
+            { "label": "Scan", "cmd": "nikto -host {T}" }
+          ]
+        },
+        {
+          "name": "gobuster",
+          "desc": "Bruteforce de repertoires/DNS",
+          "actions": [
+            { "label": "Installer", "cmd": "apt install -y gobuster" },
+            { "label": "Dirs (common)", "cmd": "gobuster dir -u http://{T} -w /usr/share/wordlists/dirb/common.txt" }
+          ]
+        },
+        {
+          "name": "whatweb",
+          "desc": "Empreinte techno d'un site",
+          "actions": [
+            { "label": "Installer", "cmd": "apt install -y whatweb" },
+            { "label": "Scan", "cmd": "whatweb {T}" }
+          ]
+        },
+        {
+          "name": "sqlmap",
+          "desc": "Injection SQL",
+          "actions": [
+            { "label": "Installer", "cmd": "apt install -y sqlmap" },
+            { "label": "Test URL", "cmd": "sqlmap -u {URL} --batch", "params": [ { "name": "URL", "hint": "http://cible/page?id=1", "default": "" } ] }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Brute",
+      "tools": [
+        {
+          "name": "hydra",
+          "desc": "Bruteforce d'authentification (T1110)",
+          "actions": [
+            { "label": "SSH", "cmd": "hydra -l {USER} -P {WORDLIST} ssh://{T}", "params": [ { "name": "USER", "hint": "login", "default": "root" }, { "name": "WORDLIST", "hint": "chemin wordlist", "default": "/usr/share/wordlists/rockyou.txt" } ] },
+            { "label": "FTP", "cmd": "hydra -l {USER} -P {WORDLIST} ftp://{T}", "params": [ { "name": "USER", "hint": "login", "default": "admin" }, { "name": "WORDLIST", "hint": "chemin wordlist", "default": "/usr/share/wordlists/rockyou.txt" } ] }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Reseau / Routeur",
+      "tools": [
+        {
+          "name": "routersploit",
+          "desc": "Exploitation box / routeurs / IoT (IP)",
+          "actions": [
+            { "label": "Installer", "cmd": "apt install -y routersploit" },
+            { "label": "Autopwn", "cmd": "rsf.py -m scanners/autopwn -s target={T} -s run 2>/dev/null || echo 'lancer rsf.py manuellement'" }
+          ]
+        },
+        {
+          "name": "enum4linux",
+          "desc": "Enumeration SMB/Windows",
+          "actions": [
+            { "label": "Installer", "cmd": "apt install -y enum4linux" },
+            { "label": "Enum complet", "cmd": "enum4linux -a {T}" }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Wifi (radio)",
+      "tools": [
+        {
+          "name": "info",
+          "desc": "Pourquoi le radio-layer est indisponible ici",
+          "actions": [
+            { "label": "Lire la limite", "cmd": "echo 'Monitor mode / injection (aircrack-ng, wifite, airgeddon) necessitent le noyau NetHunter ou un adaptateur USB OTG compatible. Indisponible sur noyau stock en chroot. Alternatives IP : voir categorie Reseau/Routeur (nmap scripts, routersploit).'" }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Exploit",
+      "tools": [
+        {
+          "name": "metasploit",
+          "desc": "Framework (CLI, sans base de donnees)",
+          "actions": [
+            { "label": "Version", "cmd": "msfconsole --version" },
+            { "label": "searchsploit", "cmd": "searchsploit {Q}", "params": [ { "name": "Q", "hint": "mot-cle (ex: vsftpd)", "default": "" } ] }
+          ]
+        }
+      ]
+    }
+  ]
+}
