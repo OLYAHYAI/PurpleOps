@@ -1,0 +1,70 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent" android:layout_height="match_parent" android:scrollbars="none">
+    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical">
+
+        <!-- Header -->
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:orientation="horizontal" android:gravity="center_vertical" android:paddingBottom="10dp">
+            <ImageView android:layout_width="26dp" android:layout_height="26dp" android:src="@drawable/ic_shield" android:layout_marginEnd="8dp" />
+            <TextView android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content"
+                android:text="PurpleOps" android:textColor="@color/text" android:textStyle="bold" android:textSize="20sp" android:letterSpacing="0.05" />
+            <TextView android:id="@+id/demoTag" android:layout_width="wrap_content" android:layout_height="wrap_content"
+                android:text="demo" android:textColor="@color/warn" android:textSize="11sp"
+                android:background="@drawable/chip_root" android:paddingStart="10dp" android:paddingEnd="10dp" />
+        </LinearLayout>
+
+        <!-- Hero statut -->
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:orientation="horizontal" android:background="@drawable/hero" android:padding="18dp" android:gravity="center_vertical">
+            <LinearLayout android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content" android:orientation="vertical">
+                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="STATUT SOC"
+                    android:textColor="@color/neon" android:textSize="12sp" android:letterSpacing="0.15" />
+                <TextView android:id="@+id/homeStatus" android:layout_width="wrap_content" android:layout_height="wrap_content"
+                    android:text="—" android:textColor="@color/text" android:textStyle="bold" android:textSize="30sp" android:paddingTop="2dp" />
+                <TextView android:id="@+id/homeStatusSub" android:layout_width="wrap_content" android:layout_height="wrap_content"
+                    android:text="Configurez Wazuh dans Reglages" android:textColor="@color/muted" android:textSize="12sp" android:paddingTop="2dp" />
+            </LinearLayout>
+            <FrameLayout android:layout_width="78dp" android:layout_height="78dp" android:background="@drawable/ring">
+                <TextView android:id="@+id/homeScore" android:layout_width="match_parent" android:layout_height="match_parent"
+                    android:gravity="center" android:text="--" android:textColor="@color/neon" android:textStyle="bold" android:textSize="22sp" />
+            </FrameLayout>
+        </LinearLayout>
+
+        <!-- Tuiles stats -->
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:orientation="horizontal" android:paddingTop="12dp">
+            <LinearLayout android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content"
+                android:orientation="vertical" android:background="@drawable/tile" android:padding="14dp" android:layout_marginEnd="8dp">
+                <TextView android:id="@+id/statAgents" android:layout_width="wrap_content" android:layout_height="wrap_content"
+                    android:text="--" android:textColor="@color/text" android:textStyle="bold" android:textSize="22sp" />
+                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Agents"
+                    android:textColor="@color/muted" android:textSize="11sp" />
+            </LinearLayout>
+            <LinearLayout android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content"
+                android:orientation="vertical" android:background="@drawable/tile" android:padding="14dp" android:layout_marginEnd="8dp">
+                <TextView android:id="@+id/statAlerts" android:layout_width="wrap_content" android:layout_height="wrap_content"
+                    android:text="--" android:textColor="@color/warn" android:textStyle="bold" android:textSize="22sp" />
+                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Alertes 24h"
+                    android:textColor="@color/muted" android:textSize="11sp" />
+            </LinearLayout>
+            <LinearLayout android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content"
+                android:orientation="vertical" android:background="@drawable/tile" android:padding="14dp">
+                <TextView android:id="@+id/statUptime" android:layout_width="wrap_content" android:layout_height="wrap_content"
+                    android:text="--" android:textColor="@color/ok" android:textStyle="bold" android:textSize="22sp" />
+                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Actifs OK"
+                    android:textColor="@color/muted" android:textSize="11sp" />
+            </LinearLayout>
+        </LinearLayout>
+
+        <!-- Alertes recentes -->
+        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Alertes recentes"
+            android:textColor="@color/text" android:textStyle="bold" android:textSize="15sp" android:paddingTop="18dp" android:paddingBottom="6dp" />
+        <LinearLayout android:id="@+id/homeAlerts" android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" />
+
+        <!-- Actifs surveilles -->
+        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Actifs surveilles"
+            android:textColor="@color/text" android:textStyle="bold" android:textSize="15sp" android:paddingTop="16dp" android:paddingBottom="6dp" />
+        <LinearLayout android:id="@+id/homeAssets" android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:paddingBottom="12dp" />
+    </LinearLayout>
+</ScrollView>
