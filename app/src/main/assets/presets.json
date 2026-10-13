@@ -1,0 +1,9 @@
+[
+  { "label": "nmap -sV",   "cmd": "nmap -sV {T}",            "needsTarget": true },
+  { "label": "nmap -sC",   "cmd": "nmap -sC {T}",            "needsTarget": true },
+  { "label": "ping sweep", "cmd": "nmap -sn {T}",            "needsTarget": true },
+  { "label": "quick",      "cmd": "nmap -T4 -F {T}",         "needsTarget": true },
+  { "label": "full",       "cmd": "nmap -sV -sC -p- {T}",    "needsTarget": true },
+  { "label": "nmap vuln",  "cmd": "nmap -sV --script vuln {T}", "needsTarget": true },
+  { "label": "whoami",     "cmd": "id; uname -a",            "needsTarget": false }
+]

@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="purple_bg">#1A1326</color>
+    <color name="purple_primary">#9A6BFF</color>
+    <color name="purple_accent">#C9A7FF</color>
+    <color name="console_bg">#0E0A16</color>
+    <color name="ic_launcher_background">#1A1326</color>
+</resources>
