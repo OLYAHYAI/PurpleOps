@@ -1,7 +1,12 @@
 package com.jbr.purpleops
 
+import android.Manifest
+import android.content.pm.PackageManager
+import android.os.Build
 import android.os.Bundle
 import android.view.ViewGroup
+import androidx.core.app.ActivityCompat
+import androidx.core.content.ContextCompat
 import android.widget.Button
 import android.widget.EditText
 import android.widget.LinearLayout
@@ -58,7 +63,23 @@ class MainActivity : AppCompatActivity() {
         clearButton.setOnClickListener { console.text = "" }
 
         loadPresets()
-        appendLine("PurpleOps pret. Perimetre : TES machines uniquement.")
+        appendLine("PurpleOps v${BuildConfig.VERSION_NAME} (code ${BuildConfig.VERSION_CODE}).")
+        appendLine("Perimetre : TES machines uniquement.")
+
+        requestNotifPermission()
+        // Verifie une mise a jour au lancement (silencieux, best-effort).
+        ui.launch { Updater.checkAndUpdate(applicationContext) { line -> appendLine(line) } }
+    }
+
+    private fun requestNotifPermission() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS)
+            != PackageManager.PERMISSION_GRANTED
+        ) {
+            ActivityCompat.requestPermissions(
+                this, arrayOf(Manifest.permission.POST_NOTIFICATIONS), 1
+            )
+        }
     }
 
     private fun loadPresets() {
