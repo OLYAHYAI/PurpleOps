@@ -5,8 +5,10 @@ import android.content.pm.PackageManager
 import android.graphics.Color
 import android.os.Build
 import android.os.Bundle
-import android.view.Gravity
+import android.view.View
 import android.view.ViewGroup
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
 import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.ScrollView
@@ -51,6 +53,16 @@ class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
+
+        // Edge-to-edge (Android 15+) : on evite que le header passe sous la barre
+        // d'etat et que le clavier masque la commande libre.
+        val rootLayout = findViewById<View>(R.id.rootLayout)
+        ViewCompat.setOnApplyWindowInsetsListener(rootLayout) { v, insets ->
+            val sb = insets.getInsets(WindowInsetsCompat.Type.systemBars())
+            val ime = insets.getInsets(WindowInsetsCompat.Type.ime())
+            v.setPadding(dp(12), sb.top + dp(6), dp(12), maxOf(sb.bottom, ime.bottom) + dp(6))
+            insets
+        }
 
         targetInput = findViewById(R.id.targetInput)
         cmdInput = findViewById(R.id.cmdInput)
@@ -244,8 +256,11 @@ class MainActivity : AppCompatActivity() {
             .putString("target", target).apply()
     }
 
+    // Retire les sequences d'echappement ANSI (couleurs) pour une console lisible.
+    private val ansi = Regex("\\u001B\\[[0-9;]*[a-zA-Z]")
+
     private fun appendLine(s: String) {
-        console.append(s + "\n")
+        console.append(ansi.replace(s, "") + "\n")
         consoleScroll.post { consoleScroll.fullScroll(ScrollView.FOCUS_DOWN) }
     }
 
