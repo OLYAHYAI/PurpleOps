@@ -23,5 +23,8 @@ fi
 
 # 3) Lancement (premier plan ; Ctrl-C pour arrêter en fin d'exercice).
 cd "$APP_DIR"
+# venv si présent (recommandé), sinon python3 système.
+PY="$APP_DIR/venv/bin/python"
+[ -x "$PY" ] || PY=python3
 echo "[purpleops-mcp] démarrage sur $TAILSCALE_IP:8765 — Ctrl-C pour arrêter"
-exec python3 "$APP_DIR/server.py"
+exec "$PY" "$APP_DIR/server.py"

@@ -216,15 +216,19 @@ def kali_exec(profile: str, target: str | None = None, port: int | None = None) 
 def kali_status() -> dict:
     """Retourne les profils autorisés, le périmètre de cibles et un test de
     joignabilité du chroot Kali (exécute `true` via le préfixe configuré)."""
-    reachable = False
-    detail = ""
-    try:
-        proc = subprocess.run([*KALI_INVOKE, "/bin/true"], shell=False,
-                              capture_output=True, text=True, timeout=15)
-        reachable = proc.returncode == 0
-        detail = proc.stderr.strip()[-300:]
-    except Exception as exc:  # noqa: BLE001
-        detail = repr(exc)
+    if not KALI_INVOKE:
+        # Serveur dans Kali : les outils sont locaux, joignabilité triviale.
+        reachable, detail = True, "local (serveur dans le chroot Kali)"
+    else:
+        reachable = False
+        detail = ""
+        try:
+            proc = subprocess.run([*KALI_INVOKE, "/bin/true"], shell=False,
+                                  capture_output=True, text=True, timeout=15)
+            reachable = proc.returncode == 0
+            detail = proc.stderr.strip()[-300:]
+        except Exception as exc:  # noqa: BLE001
+            detail = repr(exc)
     _audit({"tool": "kali_status", "caller": "claude-desktop",
             "phase": "result", "kali_reachable": reachable})
     return {

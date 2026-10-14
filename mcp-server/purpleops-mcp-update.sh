@@ -6,7 +6,9 @@ set -eu
 
 RAW="https://raw.githubusercontent.com/OLYAHYAI/PurpleOps/main/mcp-server"
 DEST="/opt/purpleops-mcp"
-TMP="$(mktemp -d)"
+# Le chroot peut hériter d'un TMPDIR Termux inexistant -> on force /tmp.
+TMPDIR=/tmp; export TMPDIR; mkdir -p /tmp
+TMP="$(mktemp -d /tmp/po.XXXXXX)"
 trap 'rm -rf "$TMP"' EXIT
 
 echo "[maj] téléchargement depuis $RAW"
