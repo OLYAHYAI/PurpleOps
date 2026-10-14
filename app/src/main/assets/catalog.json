@@ -1,5 +1,5 @@
 {
-  "version": 2,
+  "version": 3,
   "categories": [
     {
       "name": "Recon",
@@ -18,11 +18,41 @@
           ]
         },
         {
+          "name": "masscan",
+          "desc": "Scan de ports tres rapide",
+          "actions": [
+            { "label": "Installer", "cmd": "apt install -y masscan" },
+            { "label": "Tous les ports", "cmd": "masscan {T} -p1-65535 --rate 1000" }
+          ]
+        },
+        {
           "name": "hote",
           "desc": "Infos du chroot / identite",
           "actions": [
             { "label": "id + uname", "cmd": "id; uname -a" },
             { "label": "ip", "cmd": "ip -brief addr 2>/dev/null || ifconfig" }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "DNS",
+      "tools": [
+        {
+          "name": "dnsrecon",
+          "desc": "Enumeration DNS",
+          "actions": [
+            { "label": "Installer", "cmd": "apt install -y dnsrecon" },
+            { "label": "Standard", "cmd": "dnsrecon -d {DOM}", "params": [ { "name": "DOM", "hint": "domaine (ex: lab.local)", "default": "" } ] },
+            { "label": "Reverse /24", "cmd": "dnsrecon -r {T}/24" }
+          ]
+        },
+        {
+          "name": "dnsenum",
+          "desc": "Enumeration DNS (alternative)",
+          "actions": [
+            { "label": "Installer", "cmd": "apt install -y dnsenum" },
+            { "label": "Scan", "cmd": "dnsenum {DOM}", "params": [ { "name": "DOM", "hint": "domaine", "default": "" } ] }
           ]
         }
       ]
@@ -65,6 +95,48 @@
       ]
     },
     {
+      "name": "TLS / SSH",
+      "tools": [
+        {
+          "name": "sslscan",
+          "desc": "Posture TLS/SSL d'un service",
+          "actions": [
+            { "label": "Installer", "cmd": "apt install -y sslscan" },
+            { "label": "Scan (443)", "cmd": "sslscan {T}" }
+          ]
+        },
+        {
+          "name": "ssh-audit",
+          "desc": "Audit de config SSH",
+          "actions": [
+            { "label": "Installer", "cmd": "apt install -y ssh-audit" },
+            { "label": "Audit", "cmd": "ssh-audit {T}" }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "SMB",
+      "tools": [
+        {
+          "name": "smbclient",
+          "desc": "Lister les partages SMB",
+          "actions": [
+            { "label": "Installer", "cmd": "apt install -y smbclient" },
+            { "label": "Liste (null session)", "cmd": "smbclient -L //{T} -N" }
+          ]
+        },
+        {
+          "name": "smbmap",
+          "desc": "Enumeration des partages + droits",
+          "actions": [
+            { "label": "Installer", "cmd": "apt install -y smbmap" },
+            { "label": "Scan", "cmd": "smbmap -H {T}" }
+          ]
+        }
+      ]
+    },
+    {
       "name": "Brute",
       "tools": [
         {
@@ -80,6 +152,23 @@
     {
       "name": "Reseau / Routeur",
       "tools": [
+        {
+          "name": "nbtscan",
+          "desc": "Enumeration NetBIOS",
+          "actions": [
+            { "label": "Installer", "cmd": "apt install -y nbtscan" },
+            { "label": "Scan /24", "cmd": "nbtscan {T}/24" }
+          ]
+        },
+        {
+          "name": "snmp",
+          "desc": "Reconnaissance SNMP",
+          "actions": [
+            { "label": "Installer", "cmd": "apt install -y onesixtyone snmp" },
+            { "label": "Communaute (onesixtyone)", "cmd": "onesixtyone {T} public" },
+            { "label": "Walk (public)", "cmd": "snmpwalk -v2c -c public {T}" }
+          ]
+        },
         {
           "name": "routersploit",
           "desc": "Exploitation box / routeurs / IoT (IP)",
