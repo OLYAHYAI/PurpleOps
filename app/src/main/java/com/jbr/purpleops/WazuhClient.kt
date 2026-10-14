@@ -136,35 +136,41 @@ object WazuhClient {
         } finally { c.disconnect() }
     }
 
+    // Best-effort : si l'Indexer (9200) est injoignable ou refuse, on renvoie une
+    // liste vide SANS faire echouer tout le chargement (les agents restent affiches).
     private fun getAlerts(cfg: Cfg, size: Int): List<WzAlert> {
         if (cfg.idxUser.isEmpty()) return emptyList()
-        val url = "https://${cfg.host}:$IDX_PORT/wazuh-alerts-*/_search"
-        val c = open(url)
-        c.requestMethod = "POST"
-        c.setRequestProperty("Authorization", basic(cfg.idxUser, cfg.idxPass))
-        c.setRequestProperty("Content-Type", "application/json")
-        c.doOutput = true
-        val body = """{"size":$size,"sort":[{"timestamp":{"order":"desc"}}],"query":{"range":{"timestamp":{"gte":"now-24h"}}}}"""
-        c.outputStream.use { it.write(body.toByteArray()) }
         return try {
-            if (c.responseCode != 200) return emptyList()
-            val json = c.inputStream.bufferedReader().use { it.readText() }
-            val hits = JSONObject(json).getJSONObject("hits").optJSONArray("hits") ?: return emptyList()
-            val out = ArrayList<WzAlert>()
-            for (i in 0 until hits.length()) {
-                val src = hits.getJSONObject(i).getJSONObject("_source")
-                val rule = src.optJSONObject("rule")
-                val agent = src.optJSONObject("agent")
-                out.add(
-                    WzAlert(
-                        rule?.optString("description", "(alerte)") ?: "(alerte)",
-                        rule?.optInt("level", 0) ?: 0,
-                        agent?.optString("name", "-") ?: "-",
-                        src.optString("timestamp", "")
+            val url = "https://${cfg.host}:$IDX_PORT/wazuh-alerts-*/_search"
+            val c = open(url)
+            c.requestMethod = "POST"
+            c.setRequestProperty("Authorization", basic(cfg.idxUser, cfg.idxPass))
+            c.setRequestProperty("Content-Type", "application/json")
+            c.doOutput = true
+            val body = """{"size":$size,"sort":[{"timestamp":{"order":"desc"}}],"query":{"range":{"timestamp":{"gte":"now-24h"}}}}"""
+            c.outputStream.use { it.write(body.toByteArray()) }
+            try {
+                if (c.responseCode != 200) return emptyList()
+                val json = c.inputStream.bufferedReader().use { it.readText() }
+                val hits = JSONObject(json).getJSONObject("hits").optJSONArray("hits") ?: return emptyList()
+                val out = ArrayList<WzAlert>()
+                for (i in 0 until hits.length()) {
+                    val src = hits.getJSONObject(i).getJSONObject("_source")
+                    val rule = src.optJSONObject("rule")
+                    val agent = src.optJSONObject("agent")
+                    out.add(
+                        WzAlert(
+                            rule?.optString("description", "(alerte)") ?: "(alerte)",
+                            rule?.optInt("level", 0) ?: 0,
+                            agent?.optString("name", "-") ?: "-",
+                            src.optString("timestamp", "")
+                        )
                     )
-                )
-            }
-            out
-        } finally { c.disconnect() }
+                }
+                out
+            } finally { c.disconnect() }
+        } catch (e: Exception) {
+            emptyList()
+        }
     }
 }
