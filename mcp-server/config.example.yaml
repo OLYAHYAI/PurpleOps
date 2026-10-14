@@ -15,15 +15,12 @@ log_file: "/var/log/purpleops-mcp.log"
 exec_timeout_s: 300
 
 # --- Entrée dans le chroot Kali ----------------------------------------------
-# Préfixe argv ajouté devant chaque commande. À CONFIRMER sur le téléphone :
-# depuis l'INTÉRIEUR du chroot Debian, Kali n'est PAS à /data/local/kali.
-# Le mémo projet indique un bind /data/local/kali -> /android/kali en RO
-# (fait par debian-start.sh pour la traçabilité). Deux candidats :
-#   a) ["chroot", "/android/kali"]              <- si ce bind existe et suffit (RO)
-#   b) ["nsenter", "-t", "1", "-m", "--", "chroot", "/data/local/kali"]
-#                                               <- passer par l'Android hôte
-# Le bloc diagnostic (bootstrap) tranche. Valeur de départ prudente :
-kali_invoke: ["chroot", "/android/kali"]
+# ARCHI : le serveur tourne DANS le chroot Kali (outils locaux). Il n'y a donc
+# aucun saut de chroot à faire -> préfixe vide. Les commandes s'exécutent
+# directement (nmap, sslscan, ...) dans l'environnement du serveur.
+# (Le journal écrit dans /var/log ici = /android/kali/var/log vu par l'agent
+#  Wazuh côté Debian via le bind ro -> traçabilité déjà en place.)
+kali_invoke: []
 
 # --- Garde-fou cible : allowlist CIDR ----------------------------------------
 allowed_targets:

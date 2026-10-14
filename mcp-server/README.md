@@ -1,8 +1,10 @@
 # PurpleOps MCP — serveur d'assessment (Phase 4 PFE SOAR)
 
-Serveur MCP **Streamable HTTP** tournant dans le chroot Debian du Pixel 7a.
-Expose à Claude Desktop, sur l'**IP Tailscale uniquement**, un outil d'exécution
-verrouillé dans le chroot Kali (recon/assessment) + un outil de statut.
+Serveur MCP **Streamable HTTP** tournant dans le chroot **Kali** du Pixel 7a
+(les outils d'assessment y sont locaux). Expose à Claude Desktop, sur l'**IP
+Tailscale uniquement**, un outil d'exécution verrouillé + un outil de statut.
+Son journal (`/var/log/purpleops-mcp.log` dans Kali) est lu par l'agent Wazuh
+côté Debian via le bind ro `/android/kali` déjà en place.
 
 > Endpoint d'exécution = RCE par conception. Les barrières sont concentrées dans
 > `server.py` et volontairement redondantes.
@@ -31,10 +33,10 @@ Chaque appel écrit une ligne JSON dans `log_file` (phases `request`/`result`/`r
 Le décodeur + les règles custom côté manager suivent la **procédure de changement**
 (branche Git, backup, `wazuh-analysisd -t`, restart, non-régression) — étape ultérieure.
 
-## À confirmer sur le téléphone (point de contrôle)
-- `kali_invoke` : mécanisme réel d'entrée dans le chroot Kali depuis le chroot Debian
-  (mounts, droits root). Valeur par défaut `["chroot","/data/local/kali"]` à valider.
-- Chemins `token_file` / `log_file` et emplacement du code (`/opt/purpleops-mcp`).
+## Déploiement (dans le chroot Kali)
+- Code dans `/opt/purpleops-mcp` (= `/data/local/kali/opt/...` côté Android).
+- `kali_invoke: []` (outils locaux, aucun saut de chroot).
+- Token `/etc/purpleops-mcp/token` (0600), jamais commité.
 - Connectivité Claude Desktop → `100.126.112.23:8765` via le tailnet.
 
 ## Tests locaux (déjà passés en conteneur)

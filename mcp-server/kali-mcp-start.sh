@@ -1,7 +1,7 @@
-#!/system/bin/sh
-# Lancement À LA DEMANDE du serveur PurpleOps MCP, DANS le chroot Debian.
+#!/bin/sh
+# Lancement À LA DEMANDE du serveur PurpleOps MCP, DANS le chroot Kali.
 # Le chroot n'a pas de systemd : lancement par script (comme kali-start.sh).
-# À coller/exécuter TOI-MÊME sur le téléphone. Ne jamais mettre `exit` à la suite.
+# À coller/exécuter TOI-MÊME dans le chroot Kali. Ne jamais mettre `exit` à la suite.
 
 set -eu
 
