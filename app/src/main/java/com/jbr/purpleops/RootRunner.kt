@@ -23,6 +23,25 @@ object RootRunner {
     @Volatile
     private var current: Process? = null
 
+    /**
+     * Journalise une commande lancee dans un fichier lu par l'agent Wazuh
+     * (`/data/local/kali/var/log/purpleops-runs.log` = `/android/kali/...` cote agent).
+     * La ligne (deja au format syslog) est passee en base64 pour eviter tout
+     * probleme de quoting shell.
+     */
+    suspend fun logRun(syslogLine: String) = withContext(Dispatchers.IO) {
+        try {
+            val b64 = android.util.Base64.encodeToString(
+                (syslogLine + "\n").toByteArray(), android.util.Base64.NO_WRAP
+            )
+            ProcessBuilder(
+                "su", "-c",
+                "echo $b64 | base64 -d >> /data/local/kali/var/log/purpleops-runs.log"
+            ).redirectErrorStream(true).start().waitFor()
+        } catch (e: Exception) {
+        }
+    }
+
     /** Commande root cote Android (PAS dans le chroot). Retourne (code, sortie). */
     suspend fun runAndroidRoot(cmd: String): Pair<Int, String> = withContext(Dispatchers.IO) {
         try {

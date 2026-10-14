@@ -243,8 +243,13 @@ class MainActivity : AppCompatActivity() {
         execute(cmd)
     }
 
+    private val sysFmt = java.text.SimpleDateFormat("MMM dd HH:mm:ss", java.util.Locale.US)
+
     private fun execute(inner: String) {
         appendLine(""); appendLine("$ $inner")
+        // Journal des runs -> lu par l'agent Wazuh (trace "quelle commande").
+        val logLine = "${sysFmt.format(java.util.Date())} localhost purpleops: cmd=$inner"
+        ui.launch { RootRunner.logRun(logLine) }
         ui.launch {
             val code = withContext(Dispatchers.IO) {
                 RootRunner.runStreaming(inner) { line -> ui.launch { appendLine(line) } }
