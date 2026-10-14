@@ -3,6 +3,9 @@ name: build-apk
 on:
   push:
     branches: [ main, master ]
+    # Un commit qui ne touche QUE le serveur MCP ne doit pas rebuild/réinstaller l'APK.
+    paths-ignore:
+      - 'mcp-server/**'
   workflow_dispatch:
 
 permissions:

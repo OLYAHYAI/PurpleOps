@@ -1,0 +1,56 @@
+# PurpleOps MCP — configuration (chroot Debian du Pixel 7a)
+# ATTENTION : valeurs à confirmer sur le téléphone avant tout lancement réel.
+
+# --- Réseau : Tailscale-only --------------------------------------------------
+# IP Tailscale du téléphone. JAMAIS 0.0.0.0. (127.0.0.1 réservé aux tests locaux.)
+bind_host: "100.126.112.23"
+bind_port: 8765
+
+# --- Secrets & journal --------------------------------------------------------
+# Fichier token (chmod 0600), jamais commité dans PurpleOps.
+token_file: "/etc/purpleops-mcp/token"
+# Journal d'audit JSONL, surveillé par l'agent Wazuh 027 (localfile).
+log_file: "/var/log/purpleops-mcp.log"
+
+exec_timeout_s: 300
+
+# --- Entrée dans le chroot Kali ----------------------------------------------
+# Préfixe argv ajouté devant chaque commande. À CONFIRMER sur le téléphone :
+# depuis l'INTÉRIEUR du chroot Debian, Kali n'est PAS à /data/local/kali.
+# Le mémo projet indique un bind /data/local/kali -> /android/kali en RO
+# (fait par debian-start.sh pour la traçabilité). Deux candidats :
+#   a) ["chroot", "/android/kali"]              <- si ce bind existe et suffit (RO)
+#   b) ["nsenter", "-t", "1", "-m", "--", "chroot", "/data/local/kali"]
+#                                               <- passer par l'Android hôte
+# Le bloc diagnostic (bootstrap) tranche. Valeur de départ prudente :
+kali_invoke: ["chroot", "/android/kali"]
+
+# --- Garde-fou cible : allowlist CIDR ----------------------------------------
+allowed_targets:
+  - "100.64.0.0/10"     # plage Tailscale (tailnet)
+  - "10.10.10.0/24"     # LAN homelab
+  # ajouter ici le VLAN cible purple-team dédié si besoin
+
+# --- Profils figés (assessment uniquement, pas d'exploitation) ----------------
+# {TARGET} / {TARGET_PORT} sont substitués comme UN SEUL token argv (pas de shell).
+profiles:
+  nmap_quick:
+    bin: "/usr/bin/nmap"
+    args: ["-sV", "-Pn", "-T3", "--top-ports", "100", "{TARGET}"]
+    takes_target: true
+  nmap_full_tcp:
+    bin: "/usr/bin/nmap"
+    args: ["-sV", "-Pn", "-T3", "-p-", "{TARGET}"]
+    takes_target: true
+  sslscan_host:
+    bin: "/usr/bin/sslscan"
+    args: ["{TARGET}:{TARGET_PORT}"]
+    takes_target: true
+  ssh_audit:
+    bin: "/usr/bin/ssh-audit"
+    args: ["{TARGET}"]
+    takes_target: true
+  dnsrecon_std:
+    bin: "/usr/bin/dnsrecon"
+    args: ["-n", "{TARGET}", "-d", "{TARGET}"]
+    takes_target: true
