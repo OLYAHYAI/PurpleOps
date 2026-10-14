@@ -86,7 +86,6 @@ class MainActivity : AppCompatActivity() {
 
         bindKali()
         bindSettings()
-        populateDashboardDemo()
 
         bottomNav.setOnItemSelectedListener { item -> showTab(item.itemId); true }
         showTab(R.id.nav_home)
@@ -103,6 +102,7 @@ class MainActivity : AppCompatActivity() {
         viewAssets.visibility = if (id == R.id.nav_assets) View.VISIBLE else View.GONE
         viewKali.visibility = if (id == R.id.nav_kali) View.VISIBLE else View.GONE
         viewSettings.visibility = if (id == R.id.nav_settings) View.VISIBLE else View.GONE
+        if (id == R.id.nav_home || id == R.id.nav_alerts || id == R.id.nav_assets) refreshDashboard()
     }
 
     // ---------------- KALI ----------------
@@ -264,31 +264,86 @@ class MainActivity : AppCompatActivity() {
 
     // ---------------- DASHBOARD (demo en V3.0, Wazuh en V3.1) ----------------
 
-    private fun populateDashboardDemo() {
-        findViewById<TextView>(R.id.homeStatus).text = "Protege"
-        findViewById<TextView>(R.id.homeStatusSub).text = "Demo — configurez Wazuh dans Reglages"
-        findViewById<TextView>(R.id.homeScore).text = "92"
+    private var dashLoading = false
+
+    private fun refreshDashboard() {
+        if (dashLoading) return
+        dashLoading = true
+        findViewById<TextView>(R.id.homeStatusSub).text = "Chargement Wazuh…"
+        ui.launch {
+            val res = WazuhClient.load(applicationContext)
+            dashLoading = false
+            when (res) {
+                is WzResult.NotConfigured -> showDemo("Non configuré — onglet Réglages")
+                is WzResult.Err -> showDemo("Wazuh injoignable : ${res.message}")
+                is WzResult.Ok -> showLive(res.summary)
+            }
+        }
+    }
+
+    private fun colorFor(label: String) = when (label) {
+        "Protégé" -> "#5CFFA6"; "Attention" -> "#FFB454"; else -> "#FF5C7A"
+    }
+
+    private fun showLive(s: WzSummary) {
+        findViewById<TextView>(R.id.demoTag).visibility = View.GONE
+        val col = colorFor(s.statusLabel)
+        findViewById<TextView>(R.id.homeStatus).apply { text = s.statusLabel; setTextColor(Color.parseColor(col)) }
+        findViewById<TextView>(R.id.homeStatusSub).text = "Mis à jour à l'instant"
+        findViewById<TextView>(R.id.homeScore).apply { text = s.score.toString(); setTextColor(Color.parseColor(col)) }
+        findViewById<TextView>(R.id.statAgents).text = s.total.toString()
+        findViewById<TextView>(R.id.statAlerts).text = s.alerts24h.toString()
+        val pct = if (s.total > 0) s.active * 100 / s.total else 0
+        findViewById<TextView>(R.id.statUptime).text = "$pct%"
+
+        val homeAlerts = findViewById<LinearLayout>(R.id.homeAlerts).also { it.removeAllViews() }
+        val allAlerts = findViewById<LinearLayout>(R.id.alertsList).also { it.removeAllViews() }
+        if (s.alerts.isEmpty()) addInfo(homeAlerts, "Aucune alerte sur 24h")
+        for ((i, a) in s.alerts.withIndex()) {
+            val dot = if (a.level >= 10) "#FF5C7A" else if (a.level >= 7) "#FFB454" else "#5CF2FF"
+            val sub = "${a.agent} · niveau ${a.level}"
+            if (i < 5) addListItem(homeAlerts, dot, a.desc, sub)
+            addListItem(allAlerts, dot, a.desc, sub)
+        }
+
+        val homeAssets = findViewById<LinearLayout>(R.id.homeAssets).also { it.removeAllViews() }
+        val allAssets = findViewById<LinearLayout>(R.id.assetsList).also { it.removeAllViews() }
+        if (s.agents.isEmpty()) addInfo(homeAssets, "Aucun agent")
+        for ((i, ag) in s.agents.withIndex()) {
+            val dot = if (ag.status.equals("active", true)) "#5CFFA6" else "#FF5C7A"
+            val sub = "${ag.status} · ${ag.ip}"
+            if (i < 6) addListItem(homeAssets, dot, ag.name, sub)
+            addListItem(allAssets, dot, ag.name, sub)
+        }
+    }
+
+    private fun showDemo(reason: String) {
+        findViewById<TextView>(R.id.demoTag).visibility = View.VISIBLE
+        findViewById<TextView>(R.id.homeStatus).apply { text = "Protégé"; setTextColor(Color.parseColor("#EDE9F5")) }
+        findViewById<TextView>(R.id.homeStatusSub).text = reason
+        findViewById<TextView>(R.id.homeScore).apply { text = "92"; setTextColor(Color.parseColor("#B388FF")) }
         findViewById<TextView>(R.id.statAgents).text = "6"
         findViewById<TextView>(R.id.statAlerts).text = "2"
         findViewById<TextView>(R.id.statUptime).text = "99%"
+        val ha = findViewById<LinearLayout>(R.id.homeAlerts).also { it.removeAllViews() }
+        addListItem(ha, "#FF5C7A", "Connexion inhabituelle", "demo")
+        addListItem(ha, "#FFB454", "Certificat SSL expire bientot", "demo")
+        val aa = findViewById<LinearLayout>(R.id.alertsList).also { it.removeAllViews() }
+        addListItem(aa, "#FF5C7A", "Connexion inhabituelle", "demo")
+        addListItem(aa, "#FFB454", "Certificat SSL expire bientot", "demo")
+        val hs = findViewById<LinearLayout>(R.id.homeAssets).also { it.removeAllViews() }
+        addListItem(hs, "#5CFFA6", "Serveur de production", "demo")
+        addListItem(hs, "#FFB454", "Point d'acces Wi-Fi", "demo")
+        val az = findViewById<LinearLayout>(R.id.assetsList).also { it.removeAllViews() }
+        addListItem(az, "#5CFFA6", "Serveur de production", "demo")
+        addListItem(az, "#FFB454", "Point d'acces Wi-Fi", "demo")
+    }
 
-        val alerts = findViewById<LinearLayout>(R.id.homeAlerts)
-        addListItem(alerts, "#FF5C7A", "Connexion inhabituelle", "Passerelle reseau · demo")
-        addListItem(alerts, "#FFB454", "Certificat SSL expire bientot", "Serveur web · demo")
-
-        val assets = findViewById<LinearLayout>(R.id.homeAssets)
-        addListItem(assets, "#5CFFA6", "Serveur de production", "En ligne · demo")
-        addListItem(assets, "#5CFFA6", "Routeur principal", "En ligne · demo")
-        addListItem(assets, "#FFB454", "Point d'acces Wi-Fi", "Attention · demo")
-
-        // Onglets Alertes / Actifs : memes listes de demo
-        val al = findViewById<LinearLayout>(R.id.alertsList)
-        addListItem(al, "#FF5C7A", "Connexion inhabituelle", "Passerelle reseau · demo")
-        addListItem(al, "#FFB454", "Certificat SSL expire bientot", "Serveur web · demo")
-        val az = findViewById<LinearLayout>(R.id.assetsList)
-        addListItem(az, "#5CFFA6", "Serveur de production", "En ligne · demo")
-        addListItem(az, "#5CFFA6", "Routeur principal", "En ligne · demo")
-        addListItem(az, "#FFB454", "Point d'acces Wi-Fi", "Attention · demo")
+    private fun addInfo(parent: LinearLayout, text: String) {
+        parent.addView(TextView(this).apply {
+            this.text = text; setTextColor(Color.parseColor("#8A7FA5")); textSize = 13f
+            setPadding(dp(4), dp(8), dp(4), dp(8))
+        })
     }
 
     private fun addListItem(parent: LinearLayout, dotColor: String, title: String, subtitle: String) {
@@ -344,11 +399,18 @@ class MainActivity : AppCompatActivity() {
                 .putString("wz_idx_user", idxUser.text.toString().trim())
                 .putString("wz_idx_pass", idxPass.text.toString())
                 .apply()
-            status.text = "Enregistre."
-            toast("Reglages enregistres")
+            status.text = "Enregistré. Le dashboard se rafraîchira."
+            toast("Réglages enregistrés")
         }
         test.setOnClickListener {
-            status.text = "Branchement Wazuh prevu en V3.1 (donnees live)."
+            status.text = "Test en cours…"
+            ui.launch {
+                when (val res = WazuhClient.load(applicationContext)) {
+                    is WzResult.NotConfigured -> status.text = "Renseigne au moins l'hôte + identifiants API, puis Enregistrer."
+                    is WzResult.Err -> status.text = "Échec : ${res.message}"
+                    is WzResult.Ok -> status.text = "OK — ${res.summary.total} agents (${res.summary.active} actifs), ${res.summary.alerts24h} alertes/24h."
+                }
+            }
         }
         checkUpdate.setOnClickListener {
             status.text = "Recherche de mise a jour…"
