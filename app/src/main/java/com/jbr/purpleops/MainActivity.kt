@@ -37,6 +37,8 @@ class MainActivity : AppCompatActivity() {
     private lateinit var viewAssets: View
     private lateinit var viewKali: View
     private lateinit var viewSettings: View
+    private lateinit var viewCamera: View
+    private lateinit var camera: CameraPanel
     private lateinit var bottomNav: BottomNavigationView
     private var currentTab = R.id.nav_home
 
@@ -83,6 +85,9 @@ class MainActivity : AppCompatActivity() {
         viewAssets = findViewById(R.id.viewAssets)
         viewKali = findViewById(R.id.viewKali)
         viewSettings = findViewById(R.id.viewSettings)
+        viewCamera = findViewById(R.id.viewCamera)
+        camera = CameraPanel(this, viewCamera, ui)
+        findViewById<View>(R.id.homeCamera).setOnClickListener { showTab(R.id.viewCamera) }
 
         bindKali()
         bindSettings()
@@ -102,6 +107,7 @@ class MainActivity : AppCompatActivity() {
         viewAssets.visibility = if (id == R.id.nav_assets) View.VISIBLE else View.GONE
         viewKali.visibility = if (id == R.id.nav_kali) View.VISIBLE else View.GONE
         viewSettings.visibility = if (id == R.id.nav_settings) View.VISIBLE else View.GONE
+        viewCamera.visibility = if (id == R.id.viewCamera) View.VISIBLE else View.GONE
         if (id == R.id.nav_home || id == R.id.nav_alerts || id == R.id.nav_assets) refreshDashboard()
     }
 
@@ -181,7 +187,8 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onBackPressed() {
-        if (currentTab == R.id.nav_kali && level != Level.CATEGORIES) goUp()
+        if (currentTab == R.id.viewCamera) showTab(R.id.nav_home)
+        else if (currentTab == R.id.nav_kali && level != Level.CATEGORIES) goUp()
         else if (currentTab != R.id.nav_home) bottomNav.selectedItemId = R.id.nav_home
         else super.onBackPressed()
     }
@@ -437,5 +444,6 @@ class MainActivity : AppCompatActivity() {
     override fun onDestroy() {
         super.onDestroy()
         RootRunner.stop()
+        camera.stop()
     }
 }
