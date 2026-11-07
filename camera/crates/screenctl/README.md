@@ -7,9 +7,11 @@ PC Windows, **par câble USB-C uniquement**, sans `adb` et sans Wi-Fi. Pendant
 Étude de conception (transport, choix de capture, codec, risques) : [`ETUDE.md`](ETUDE.md).
 Client PC : [`../../pc-client/screenview`](../../pc-client/screenview).
 
-## État : incrément 1 — image fixe + toucher
+## État : incrément 2 — flux H.264
 
-- Capture d'une trame via `screencap` (RGBA brut), envoyée au PC à la demande.
+- **Flux H.264** (défaut) : `screenrecord` (encodeur matériel du téléphone) en continu,
+  relancé toutes les 3 min ; décodé côté PC par OpenH264 embarqué.
+- Mode **brut** (`screenview --raw`) : `screencap` RGBA à la demande, gardé pour comparer.
 - Toucher, balayage, Retour/Accueil via `input`.
 - Transport TCP lié à la **seule interface de partage USB**.
 - Jeton 32 hex régénéré à chaque démarrage, exigé à la connexion.
@@ -49,11 +51,19 @@ Device »). Le jeton est demandé s'il manque.
 | clic droit | Retour |
 | clic molette | Accueil |
 
-Échap ferme la fenêtre. Le titre affiche img/s et latence.
+Échap ferme la fenêtre. Le titre affiche img/s, débit et temps de décodage.
+Options : `--mbps N` (débit vidéo, défaut 8), `--raw` (ancien mode, pour comparer).
+
+`screenrecord` n'envoie une image que quand l'écran change : écran immobile = 0 img/s, c'est normal.
 
 ### Mesure incrément 1 (Pixel 7a, 1080x2400, RGBA brut)
 ≈ 2,4 img/s, latence aller-retour ≈ 390 ms (dominée par `screencap` + 10 Mo/image).
-Référence avant MJPEG / H.264.
+Référence avant H.264.
+
+Compatibilité du décodeur (testé, flux 1080x2400 découpés en paquets de 1500 o) :
+Baseline 120/120 images (3,5 ms/img) ; Main/High **sans B-frames** 120/120 (~11 ms/img) ;
+avec B-frames, échec. Les encodeurs Android n'en produisent pas par défaut.
+Outil de diagnostic : `cargo run --release --example decode_file -- flux.h264`.
 
 ## Sécurité
 

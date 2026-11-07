@@ -8,6 +8,8 @@ license = "MIT"
 [dependencies]
 # Fenêtre + tampon de pixels + souris/clavier, une seule dépendance, multiplateforme.
 minifb = "0.25"
+# Décodeur H.264 (Cisco OpenH264, compilé depuis les sources et embarqué : rien à installer).
+openh264 = "0.9"
 
 [profile.release]
 opt-level = 2
