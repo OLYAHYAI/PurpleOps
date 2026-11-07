@@ -403,7 +403,7 @@ fn desc_line(d: &PropDesc) -> String {
     )
 }
 
-fn all_props(cam: &mut Camera) -> Vec<u16> {
+pub(crate) fn all_props(cam: &mut Camera) -> Vec<u16> {
     let mut v = cam.info.as_ref().map(|i| i.properties.clone()).unwrap_or_default();
     if cam.supports(OC_NIKON_GET_VENDOR_PROP_CODES) {
         if let Ok(x) = cam.vendor_prop_codes() {

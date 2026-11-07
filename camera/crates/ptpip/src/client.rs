@@ -460,6 +460,12 @@ impl Camera {
         })
     }
 
+    /// Mise au point automatique à la demande (Nikon AfDrive, 0x90C1).
+    pub fn af_drive(&mut self) -> Result<()> {
+        self.call(OC_NIKON_AF_DRIVE, &[])?;
+        self.wait_ready(Duration::from_secs(5))
+    }
+
     /// Événements en attente par Nikon CheckEvent (0x90C7).
     pub fn check_events(&mut self) -> Result<Vec<(u16, u32)>> {
         let r = self.call(OC_NIKON_CHECK_EVENT, &[])?;

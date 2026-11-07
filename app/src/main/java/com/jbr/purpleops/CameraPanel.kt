@@ -82,9 +82,14 @@ class CameraPanel(
 
     private fun probe() {
         if (!ready()) return
+        // La P900 n'accepte qu'une connexion : on arrête la visée avant le relevé.
+        val wasServing = serveProc != null
+        if (wasServing) stop()
         status.text = "Relevé en cours…"
         scope.launch {
-            val cmd = "mkdir -p $home && HOME=$home '$bin' --iface wlan0 --timeout 6 probe 2>&1"
+            if (wasServing) kotlinx.coroutines.delay(2000)
+            val run = "HOME=$home '$bin' --iface wlan0 --timeout 6"
+            val cmd = "mkdir -p $home && $run probe 2>&1; $run props 2>&1"
             val (code, out) = RootRunner.runAndroidRoot(cmd)
             append(out.trim())
             status.text = if (code == 0) "Relevé terminé — détails dans le journal" else "Échec du relevé (code $code)"

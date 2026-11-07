@@ -162,6 +162,7 @@ impl State {
                 OC_GET_DEVICE_PROP_VALUE,
                 OC_SET_DEVICE_PROP_VALUE,
                 OC_NIKON_CHECK_EVENT,
+                OC_NIKON_AF_DRIVE,
                 OC_NIKON_DEVICE_READY,
                 OC_NIKON_GET_VENDOR_PROP_CODES,
                 OC_NIKON_START_LIVEVIEW,
@@ -266,6 +267,7 @@ impl State {
                 (RC_DEVICE_BUSY, vec![], None, None)
             }
             OC_NIKON_DEVICE_READY => ok(None),
+            OC_NIKON_AF_DRIVE => ok(None),
             OC_NIKON_GET_LIVEVIEW_IMG if !self.liveview => (RC_NIKON_NOT_LIVEVIEW, vec![], None, None),
             OC_NIKON_GET_LIVEVIEW_IMG => {
                 // En-tête de 128 octets (taille arbitraire, variable selon les modèles Nikon), puis JPEG.
