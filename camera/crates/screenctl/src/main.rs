@@ -18,6 +18,10 @@
 //!     0x02 TAP        : u32 x, u32 y  -> réponse 1 octet 0x00
 //!     0x03 SWIPE      : u32 x1, y1, x2, y2, ms  -> réponse 1 octet 0x00
 //!     0x04 KEY        : u32 keycode Android (4 = Retour, 3 = Accueil…) -> 0x00
+//!     0x05 STREAM     : u32 débit (bit/s, 0 = défaut) -> bascule en mode flux :
+//!                       le serveur n'envoie plus que du H.264 brut (Annex-B,
+//!                       encodeur matériel via `screenrecord`) ; le client continue
+//!                       d'envoyer TAP/SWIPE/KEY, mais **sans accusé de réception**.
 //!   Tout opcode inconnu ferme la connexion.
 //!
 //! Lien USB : `serve --usb` passe la prise USB en carte réseau NCM (`svc usb
@@ -208,6 +212,11 @@ fn serve_client(mut s: TcpStream, token: &str, log: &mut Logger, peer: &str) -> 
                 log.line(&format!("key {peer} {}", v[0]));
                 s.write_all(&[0x00])?;
             }
+            0x05 => {
+                let v = read_u32s::<1>(&mut s)?;
+                let bitrate = if v[0] == 0 { DEFAULT_BITRATE } else { v[0].clamp(500_000, 40_000_000) };
+                return serve_stream(s, bitrate, log, peer);
+            }
             other => {
                 log.line(&format!("opcode inconnu {other:#x} de {peer}"));
                 return Err(err(format!("opcode inconnu {other:#x}")));
@@ -248,6 +257,129 @@ fn capture_frame() -> io::Result<(usize, usize, usize, Vec<u8>)> {
     };
     let pixels = buf[header..header + need].to_vec();
     Ok((w, h, bpp, pixels))
+}
+
+const DEFAULT_BITRATE: u32 = 8_000_000;
+
+/// Mode flux : un fil copie la sortie H.264 de `screenrecord` vers la socket
+/// (relancé à chaque fin de process : limite de 3 min par appel), pendant que ce
+/// fil-ci lit les gestes du client et les injecte, sans accusé de réception.
+fn serve_stream(s: TcpStream, bitrate: u32, log: &mut Logger, peer: &str) -> io::Result<()> {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::{Arc, Mutex};
+
+    log.line(&format!("stream {peer} h264 {bitrate} bit/s"));
+    let alive = Arc::new(AtomicBool::new(true));
+    let child: Arc<Mutex<Option<std::process::Child>>> = Arc::new(Mutex::new(None));
+
+    let video = {
+        let mut out = s.try_clone()?;
+        let alive = alive.clone();
+        let child = child.clone();
+        std::thread::spawn(move || -> String {
+            let mut buf = vec![0u8; 256 * 1024];
+            let mut quick_fails = 0;
+            while alive.load(Ordering::SeqCst) {
+                let started = std::time::Instant::now();
+                let spawned = Command::new("screenrecord")
+                    .args([
+                        "--output-format=h264",
+                        &format!("--bit-rate={bitrate}"),
+                        "--time-limit=180",
+                        "-",
+                    ])
+                    .stdin(Stdio::null())
+                    .stdout(Stdio::piped())
+                    .stderr(Stdio::null())
+                    .spawn();
+                let mut c = match spawned {
+                    Ok(c) => c,
+                    Err(e) => return format!("screenrecord introuvable : {e}"),
+                };
+                let mut so = c.stdout.take().expect("stdout piped");
+                *child.lock().unwrap_or_else(|p| p.into_inner()) = Some(c);
+                loop {
+                    match so.read(&mut buf) {
+                        Ok(0) => break, // fin du process (limite 3 min) -> on relance
+                        Ok(n) => {
+                            if out.write_all(&buf[..n]).is_err() {
+                                alive.store(false, Ordering::SeqCst);
+                                break;
+                            }
+                        }
+                        Err(_) => break,
+                    }
+                }
+                if let Some(mut c) = child.lock().unwrap_or_else(|p| p.into_inner()).take() {
+                    let _ = c.kill();
+                    let _ = c.wait();
+                }
+                // Échecs immédiats à répétition : on n'insiste pas.
+                if started.elapsed() < std::time::Duration::from_secs(2) {
+                    quick_fails += 1;
+                    if quick_fails >= 5 {
+                        alive.store(false, Ordering::SeqCst);
+                        let _ = out.shutdown(std::net::Shutdown::Both);
+                        return "screenrecord échoue au démarrage (5 fois)".into();
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(300));
+                } else {
+                    quick_fails = 0;
+                }
+            }
+            "flux terminé".into()
+        })
+    };
+
+    // Fil principal : gestes du client, sans réponse.
+    let mut s = s;
+    let res: io::Result<()> = (|| loop {
+        if !alive.load(Ordering::SeqCst) {
+            return Ok(());
+        }
+        let mut op = [0u8; 1];
+        if s.read_exact(&mut op).is_err() {
+            return Ok(());
+        }
+        match op[0] {
+            0x00 => {}
+            0x02 => {
+                let v = read_u32s::<2>(&mut s)?;
+                input(&["tap", &v[0].to_string(), &v[1].to_string()]);
+                log.line(&format!("tap {peer} {},{}", v[0], v[1]));
+            }
+            0x03 => {
+                let v = read_u32s::<5>(&mut s)?;
+                let ms = v[4].clamp(50, 3000);
+                let a: Vec<String> = [v[0], v[1], v[2], v[3], ms].iter().map(u32::to_string).collect();
+                input(&["swipe", &a[0], &a[1], &a[2], &a[3], &a[4]]);
+                log.line(&format!("swipe {peer} {},{} -> {},{} {ms}ms", v[0], v[1], v[2], v[3]));
+            }
+            0x04 => {
+                let v = read_u32s::<1>(&mut s)?;
+                input(&["keyevent", &v[0].to_string()]);
+                log.line(&format!("key {peer} {}", v[0]));
+            }
+            other => return Err(err(format!("opcode inconnu en flux {other:#x}"))),
+        }
+    })();
+
+    // Arrêt propre : on coupe screenrecord et la socket, le fil vidéo sort.
+    alive.store(false, Ordering::SeqCst);
+    if let Some(mut c) = child.lock().unwrap_or_else(|p| p.into_inner()).take() {
+        let _ = c.kill();
+        let _ = c.wait();
+    }
+    let _ = s.shutdown(std::net::Shutdown::Both);
+    // Pas de join bloquant : si le fil vidéo est déjà sorti on a sa raison, sinon il
+    // sortira seul (socket fermée), et le service reste disponible pour le PC suivant.
+    let why = if video.is_finished() {
+        video.join().unwrap_or_else(|_| "fil vidéo en erreur".into())
+    } else {
+        "client parti".into()
+    };
+    log.line(&format!("stream {peer} fin : {why}"));
+    res
 }
 
 fn read_u32s<const N: usize>(s: &mut TcpStream) -> io::Result<[u32; N]> {
