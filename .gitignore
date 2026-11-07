@@ -9,3 +9,6 @@
 .cxx
 local.properties
 app/build/
+
+# Binaire p900ctl genere par la CI (dossier camera/)
+app/src/main/jniLibs/

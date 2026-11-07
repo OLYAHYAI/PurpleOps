@@ -49,6 +49,15 @@ android {
         }
     }
 
+    // p900ctl (module camera) est un executable range en lib*.so : il doit etre
+    // extrait sur le disque a l'installation et laisse intact.
+    packaging {
+        jniLibs {
+            useLegacyPackaging = true
+            keepDebugSymbols += "**/libp900ctl.so"
+        }
+    }
+
     buildFeatures {
         buildConfig = true
     }

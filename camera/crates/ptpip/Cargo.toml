@@ -1,0 +1,15 @@
+[package]
+name = "p900-ptpip"
+description = "Client PTP/IP minimal (ISO 15740, CIPA DC-X005) avec les opérations Nikon des COOLPIX Wi-Fi"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[lib]
+name = "ptpip"
+
+[dependencies]
+# Seule dépendance : liaison de la socket à une interface (SO_BINDTODEVICE)
+# et connexion avec délai, nécessaires dans un chroot Android.
+socket2 = { version = "0.6", features = ["all"] }

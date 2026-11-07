@@ -1,0 +1,11 @@
+[package]
+name = "fakecam"
+description = "Simulateur PTP/IP d'une COOLPIX Wi-Fi, pour tester p900ctl sans l'appareil"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+publish = false
+
+[dependencies]
+p900-ptpip = { path = "../ptpip" }

@@ -30,6 +30,17 @@ jobs:
         with:
           gradle-version: '8.10.2'
 
+      # Module camera (Rust) : tests sur l'hote, puis binaire Android arm64
+      # embarque dans l'APK comme libp900ctl.so (extrait dans nativeLibraryDir).
+      - name: Build p900ctl (camera Nikon)
+        run: |
+          rustup target add aarch64-linux-android
+          cargo test --manifest-path camera/Cargo.toml --quiet
+          export CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER="$ANDROID_NDK_LATEST_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android33-clang"
+          cargo build --manifest-path camera/Cargo.toml --release -p p900ctl --target aarch64-linux-android
+          mkdir -p app/src/main/jniLibs/arm64-v8a
+          cp camera/target/aarch64-linux-android/release/p900ctl app/src/main/jniLibs/arm64-v8a/libp900ctl.so
+
       # versionCode = numero de build (monotone) ; versionName = 0.1.<build>.
       - name: Build debug APK
         run: >
