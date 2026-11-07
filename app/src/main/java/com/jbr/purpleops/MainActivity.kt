@@ -38,7 +38,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var viewKali: View
     private lateinit var viewSettings: View
     private lateinit var viewCamera: View
-    private lateinit var camera: CameraPanel
+    private var camera: CameraPanel? = null
     private lateinit var bottomNav: BottomNavigationView
     private var currentTab = R.id.nav_home
 
@@ -86,8 +86,12 @@ class MainActivity : AppCompatActivity() {
         viewKali = findViewById(R.id.viewKali)
         viewSettings = findViewById(R.id.viewSettings)
         viewCamera = findViewById(R.id.viewCamera)
-        camera = CameraPanel(this, viewCamera, ui)
-        findViewById<View>(R.id.homeCamera).setOnClickListener { showTab(R.id.viewCamera) }
+        // Une erreur dans la section caméra ne doit jamais empêcher l'appli
+        // (et sa mise à jour automatique) de démarrer.
+        camera = try { CameraPanel(this, viewCamera, ui) } catch (e: Exception) { null }
+        findViewById<View>(R.id.homeCamera).setOnClickListener {
+            if (camera != null) showTab(R.id.viewCamera) else toast("Section caméra indisponible")
+        }
 
         bindKali()
         bindSettings()
@@ -444,6 +448,6 @@ class MainActivity : AppCompatActivity() {
     override fun onDestroy() {
         super.onDestroy()
         RootRunner.stop()
-        camera.stop()
+        camera?.stop()
     }
 }
