@@ -9,10 +9,16 @@ Service **téléphone** de PurpleOps (Rust std pur, root KernelSU), client PC
 puis double-clic sur `screenview.exe` (Release GitHub) dans les 2 minutes.
 Le PC est mémorisé.
 
-**Ensuite** : double-clic sur `screenview.exe`. Rien à saisir : le téléphone est
-trouvé seul (passerelle de la carte « UsbNcm »), le PC s'identifie par sa clé
-(`%APPDATA%\PurpleOps\screenview.key`). L'exe peut rester ouvert : il attend le
-téléphone et se reconnecte seul.
+**Ensuite** : double-clic sur `screenview.exe`. Une seule fenêtre, sans console :
+son titre affiche l'état (attente, appairage, img/s). Le téléphone est trouvé seul
+(passerelle de la carte « UsbNcm »), le PC s'identifie par sa clé
+(`%APPDATA%\PurpleOps\screenview.key`), et l'exe se reconnecte seul.
+Journal : `%APPDATA%\PurpleOps\screenview.log`.
+
+**Réseau** : au premier lancement, Windows demande une confirmation administrateur.
+Elle sert à mettre la carte USB du téléphone en dernière priorité (métrique 5000).
+Sans cela, Windows la préfère au Wi-Fi (426 Mbit/s annoncés contre 144) et fait
+passer Internet par le téléphone.
 
 Case **Démarrer automatiquement** (décochée par défaut) : le service démarre avec
 l'appli et continue de tourner quand on la ferme. Débrancher pour sortir avec la
@@ -24,7 +30,8 @@ caméra puis rebrancher : le lien se réarme tout seul.
 | molette | défiler |
 | clic droit / Échap | Retour |
 | clic molette | Accueil |
-| clavier | texte, Entrée, Effacer, flèches, Ctrl+A/C/V/X/Z |
+| clavier | texte (accents compris), Entrée, Effacer, flèches, Ctrl+A/C/V/X/Z |
+| copier sur l'un | coller sur l'autre (presse-papiers texte synchronisé dans les deux sens) |
 
 ## Architecture
 
@@ -33,6 +40,7 @@ caméra puis rebrancher : le lien se réarme tout seul.
 | Lien | prise USB en carte réseau NCM (`svc usb setFunctions ncm`), écoute sur `ncm0` seul ; Android choisit le sous-réseau et fait le DHCP du PC |
 | Vidéo | H.264 matériel (`screenrecord`), **délimité image par image côté téléphone** (u32 taille + image) : le PC ne devine jamais où une image finit |
 | Entrées | écran tactile multipoint + clavier virtuels **/dev/uinput** : ~0,1 ms par événement (contre ~500 ms avec la commande `input`) |
+| Presse-papiers, texte Unicode | aide Java de l'APK (`ScreenHelper.kt`) lancée par `app_process` sous l'uid shell (repli root) : service `clipboard`, injection via la table du clavier virtuel, collage pour les caractères sans touche |
 | Accès | appairage façon ADB : clé du PC, acceptée seulement pendant la fenêtre ouverte depuis le téléphone (2 min) ; liste `/data/local/soc/screenctl_pcs` (0600) |
 | Journal SOC | `/data/local/soc/screenctl.log` : démarrage, appairages, refus, sessions |
 
@@ -49,8 +57,8 @@ Commandes : `screenctl serve --usb` · `pair [s]` · `forget` · `usb-off`.
 
 ## Limites connues
 
-- Texte : caractères ASCII seulement pour l'instant (disposition US côté téléphone) ;
-  accents et presse-papiers PC ↔ téléphone : prochaine étape (aide Java via `app_process`).
+- Presse-papiers : texte seulement (pas d'images ni de fichiers).
+- Envoi de fichiers : pas encore.
 - Rotation de l'écran : figée au début de chaque segment `screenrecord` (3 min).
 
 ## Sécurité

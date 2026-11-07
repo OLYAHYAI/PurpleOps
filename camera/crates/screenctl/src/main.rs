@@ -9,21 +9,27 @@
 //!   l'appli (bouton APPAIRER, 2 min). Liste : `<dir>/screenctl_pcs`.
 //! - Journal SOC : `<dir>/screenctl.log` (ingéré par l'agent Wazuh).
 //!
-//! Protocole « PPSCR2 » (entiers gros-boutistes) :
-//!   C->S  "PPSCR2 <clé 64 hex> <nom du PC>\n"
+//! - Presse-papiers et texte Unicode : aide Java de l'APK lancée par `app_process`
+//!   (`ScreenHelper.kt`, uid shell), pilotée par stdin/stdout.
+//!
+//! Protocole « PPSCR3 » (entiers gros-boutistes) :
+//!   C->S  "PPSCR3 <clé 64 hex> <nom du PC>\n"
 //!   S->C  1 octet : 0x00 autorisé | 0x02 refusé (PC non appairé)
 //!   C->S  0x05 STREAM u32 débit (bit/s, 0 = défaut)
-//!   S->C  u32 largeur, u32 hauteur de l'écran, puis des images H.264 :
-//!         u32 taille + image Annex-B complète (une unité d'accès)
+//!   S->C  u32 largeur, u32 hauteur de l'écran, puis des messages :
+//!         u8 type + u32 taille + contenu
+//!           1 = image H.264 Annex-B complète (une unité d'accès)
+//!           2 = presse-papiers du téléphone (UTF-8)
 //!   C->S  événements, sans réponse :
 //!         0x10 DOWN x y | 0x11 MOVE x y | 0x12 UP
 //!         0x20 KEY code(Linux) mods(bit0 Maj, bit1 Ctrl, bit2 Alt)
-//!         0x21 TEXT len + UTF-8   | 0x30 SCROLL x y dy(i32) | 0x00 PING
+//!         0x21 TEXT len + UTF-8   | 0x22 CLIP len + UTF-8 (presse-papiers du PC)
+//!         0x30 SCROLL x y dy(i32) | 0x00 PING
 
 mod uinput;
 
 use std::fs::{self, File, OpenOptions};
-use std::io::{self, Read, Write};
+use std::io::{self, BufRead, Read, Write};
 use std::net::{Ipv4Addr, SocketAddr, TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode, Stdio};
@@ -32,7 +38,7 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-const PROTO: &str = "PPSCR2";
+const PROTO: &str = "PPSCR3";
 const DEFAULT_PORT: u16 = 8099;
 const DEFAULT_DIR: &str = "/data/local/soc";
 const DEFAULT_BITRATE: u32 = 8_000_000;
@@ -266,17 +272,19 @@ impl Ctx {
     /// Session : vidéo dans un fil, événements d'entrée dans celui-ci.
     fn stream(&self, s: TcpStream, bitrate: u32, peer: &str) -> io::Result<()> {
         let (w, h) = display_size();
-        let mut out = s.try_clone()?;
-        out.write_all(&w.to_be_bytes())?;
-        out.write_all(&h.to_be_bytes())?;
+        let mut first = s.try_clone()?;
+        first.write_all(&w.to_be_bytes())?;
+        first.write_all(&h.to_be_bytes())?;
+        let out: Out = Arc::new(Mutex::new(first));
         self.log(&format!("stream {peer} {w}x{h} h264 {bitrate} bit/s"));
+        let helper = Helper::start(out.clone(), self.log.clone());
 
         let mut touch = uinput::Touch::new(w, h).map_err(|e| self.log(&format!("uinput tactile : {e}"))).ok();
         let mut kbd = uinput::Keyboard::new().map_err(|e| self.log(&format!("uinput clavier : {e}"))).ok();
 
         let alive = Arc::new(AtomicBool::new(true));
         let child: Arc<Mutex<Option<std::process::Child>>> = Arc::new(Mutex::new(None));
-        let video = spawn_video(out, bitrate, alive.clone(), child.clone());
+        let video = spawn_video(out.clone(), bitrate, alive.clone(), child.clone());
 
         let mut s = s;
         let mut skipped = 0u32;
@@ -322,6 +330,10 @@ impl Ctx {
                     }
                     let mut b = vec![0u8; len];
                     s.read_exact(&mut b)?;
+                    // Aide Java prête : texte Unicode, indépendant de la disposition.
+                    if helper.send('T', &b) {
+                        continue;
+                    }
                     if let Some(k) = kbd.as_mut() {
                         for c in String::from_utf8_lossy(&b).chars() {
                             match uinput::us_key(c) {
@@ -330,6 +342,15 @@ impl Ctx {
                             }
                         }
                     }
+                }
+                0x22 => {
+                    let len = read_u32s::<1>(&mut s)?[0] as usize;
+                    if len > 1 << 20 {
+                        return Err(err("presse-papiers trop long".into()));
+                    }
+                    let mut b = vec![0u8; len];
+                    s.read_exact(&mut b)?;
+                    helper.send('C', &b);
                 }
                 0x30 => {
                     let v = read_u32s::<3>(&mut s)?;
@@ -358,6 +379,7 @@ impl Ctx {
         let _ = s.shutdown(std::net::Shutdown::Both);
         drop(touch);
         drop(kbd);
+        helper.stop();
         let why = if video.is_finished() {
             video.join().unwrap_or_else(|_| "fil vidéo en erreur".into())
         } else {
@@ -379,7 +401,7 @@ impl Ctx {
 /// se remplit encore (attente de 3 ms au plus) : on obtient l'image entière, que le
 /// PC décode sans jamais deviner où elle se termine.
 fn spawn_video(
-    mut out: TcpStream,
+    out: Out,
     bitrate: u32,
     alive: Arc<AtomicBool>,
     child: Arc<Mutex<Option<std::process::Child>>>,
@@ -415,7 +437,7 @@ fn spawn_video(
                         Ok(n) => frame.extend_from_slice(&buf[..n]),
                     }
                 }
-                let ok = out.write_all(&(frame.len() as u32).to_be_bytes()).and_then(|_| out.write_all(&frame));
+                let ok = send_msg(&out, 1, &frame);
                 if ok.is_err() {
                     alive.store(false, Ordering::SeqCst);
                     break 'proc;
@@ -429,7 +451,7 @@ fn spawn_video(
                 quick_fails += 1;
                 if quick_fails >= 5 {
                     alive.store(false, Ordering::SeqCst);
-                    let _ = out.shutdown(std::net::Shutdown::Both);
+                    let _ = out.lock().unwrap_or_else(|p| p.into_inner()).shutdown(std::net::Shutdown::Both);
                     return "screenrecord échoue au démarrage (5 fois)".into();
                 }
                 thread::sleep(Duration::from_millis(300));
@@ -466,6 +488,150 @@ fn pipe_grow(p: &std::process::ChildStdout) {
     unsafe {
         fcntl(p.as_raw_fd(), 1031, 1 << 20);
     }
+}
+
+/// Sortie vers le PC, partagée entre le fil vidéo et le presse-papiers.
+type Out = Arc<Mutex<TcpStream>>;
+
+/// Message serveur -> PC : u8 type + u32 taille + contenu, écrit d'un bloc.
+fn send_msg(out: &Out, typ: u8, data: &[u8]) -> io::Result<()> {
+    let mut o = out.lock().unwrap_or_else(|p| p.into_inner());
+    let mut head = [0u8; 5];
+    head[0] = typ;
+    head[1..].copy_from_slice(&(data.len() as u32).to_be_bytes());
+    o.write_all(&head)?;
+    o.write_all(data)
+}
+
+/// Aide Java (`ScreenHelper` dans l'APK) : presse-papiers et texte Unicode.
+/// Lancée sous l'uid shell (comme scrcpy : accès presse-papiers et injection
+/// autorisés), en root si cela échoue. Démarrage d'une JVM : ~1 s, en arrière-plan ;
+/// en attendant, le texte passe par le clavier virtuel.
+struct Helper {
+    stdin: Arc<Mutex<Option<std::process::ChildStdin>>>,
+    child: Arc<Mutex<Option<std::process::Child>>>,
+}
+
+impl Helper {
+    fn start(out: Out, log: Arc<Mutex<Logger>>) -> Helper {
+        let h = Helper { stdin: Arc::new(Mutex::new(None)), child: Arc::new(Mutex::new(None)) };
+        let (stdin, child) = (h.stdin.clone(), h.child.clone());
+        thread::spawn(move || {
+            let logl = |m: &str| log.lock().unwrap_or_else(|p| p.into_inner()).line(m);
+            let Some(apk) = apk_path() else {
+                logl("aide : APK introuvable, presse-papiers désactivé");
+                return;
+            };
+            for as_shell in [true, false] {
+                let mut cmd = Command::new("app_process");
+                cmd.env("CLASSPATH", &apk)
+                    .args(["/system/bin", "com.jbr.purpleops.ScreenHelper"])
+                    .stdin(Stdio::piped())
+                    .stdout(Stdio::piped())
+                    .stderr(Stdio::null());
+                if as_shell {
+                    use std::os::unix::process::CommandExt;
+                    cmd.uid(2000).gid(2000);
+                }
+                let Ok(mut c) = cmd.spawn() else { continue };
+                let (Some(si), Some(so)) = (c.stdin.take(), c.stdout.take()) else { continue };
+                *child.lock().unwrap_or_else(|p| p.into_inner()) = Some(c);
+                let mut lines = io::BufReader::new(so).lines();
+                // Attend « R » : l'aide est prête.
+                let ready = loop {
+                    match lines.next() {
+                        Some(Ok(l)) if l == "R" => break true,
+                        Some(Ok(l)) if l.starts_with("E ") => logl(&format!("aide : {}", &l[2..])),
+                        Some(Ok(_)) => {}
+                        _ => break false,
+                    }
+                };
+                if !ready {
+                    if let Some(mut c) = child.lock().unwrap_or_else(|p| p.into_inner()).take() {
+                        let _ = c.kill();
+                        let _ = c.wait();
+                    }
+                    logl(&format!("aide : échec du démarrage ({})", if as_shell { "uid shell" } else { "root" }));
+                    continue;
+                }
+                logl(&format!("aide prête ({})", if as_shell { "uid shell" } else { "root" }));
+                *stdin.lock().unwrap_or_else(|p| p.into_inner()) = Some(si);
+                for l in lines.map_while(Result::ok) {
+                    if let Some(b) = l.strip_prefix("C ") {
+                        if let Some(text) = b64_decode(b) {
+                            if send_msg(&out, 2, &text).is_err() {
+                                break;
+                            }
+                        }
+                    } else if let Some(m) = l.strip_prefix("E ") {
+                        logl(&format!("aide : {m}"));
+                    }
+                }
+                return;
+            }
+        });
+        h
+    }
+
+    /// Envoie une commande à l'aide ; faux si elle n'est pas (encore) prête.
+    fn send(&self, cmd: char, data: &[u8]) -> bool {
+        let mut g = self.stdin.lock().unwrap_or_else(|p| p.into_inner());
+        let Some(si) = g.as_mut() else { return false };
+        let line = format!("{cmd} {}\n", b64_encode(data));
+        if si.write_all(line.as_bytes()).and_then(|_| si.flush()).is_err() {
+            *g = None;
+            return false;
+        }
+        true
+    }
+
+    fn stop(&self) {
+        self.stdin.lock().unwrap_or_else(|p| p.into_inner()).take();
+        if let Some(mut c) = self.child.lock().unwrap_or_else(|p| p.into_inner()).take() {
+            let _ = c.kill();
+            let _ = c.wait();
+        }
+    }
+}
+
+/// .../com.jbr.purpleops-XXX/lib/arm64/libscreenctl.so -> .../base.apk
+fn apk_path() -> Option<String> {
+    let exe = std::env::current_exe().ok()?;
+    let apk = exe.parent()?.parent()?.parent()?.join("base.apk");
+    apk.exists().then(|| apk.to_string_lossy().into_owned())
+}
+
+const B64: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
+fn b64_encode(d: &[u8]) -> String {
+    let mut s = String::with_capacity(d.len().div_ceil(3) * 4);
+    for c in d.chunks(3) {
+        let n = (c[0] as u32) << 16 | (*c.get(1).unwrap_or(&0) as u32) << 8 | *c.get(2).unwrap_or(&0) as u32;
+        for i in 0..4 {
+            if i <= c.len() {
+                s.push(B64[(n >> (18 - 6 * i) & 63) as usize] as char);
+            } else {
+                s.push('=');
+            }
+        }
+    }
+    s
+}
+
+fn b64_decode(s: &str) -> Option<Vec<u8>> {
+    let mut out = Vec::with_capacity(s.len() * 3 / 4);
+    let (mut acc, mut bits) = (0u32, 0);
+    for ch in s.bytes().filter(|c| *c != b'=') {
+        let v = B64.iter().position(|b| *b == ch)? as u32;
+        acc = acc << 6 | v;
+        bits += 6;
+        if bits >= 8 {
+            bits -= 8;
+            out.push((acc >> bits) as u8);
+            acc &= (1 << bits) - 1;
+        }
+    }
+    Some(out)
 }
 
 /// Taille de l'écran (taille forcée si définie) via `wm size`.
@@ -604,6 +770,16 @@ mod tests {
         assert!(ct_eq(b"abc", b"abc"));
         assert!(!ct_eq(b"abc", b"abd"));
         assert!(!ct_eq(b"abc", b"ab"));
+    }
+
+    #[test]
+    fn base64_roundtrip() {
+        for s in ["", "a", "ab", "abc", "été 👍 «ok»"] {
+            let e = b64_encode(s.as_bytes());
+            assert_eq!(b64_decode(&e).unwrap(), s.as_bytes());
+        }
+        assert_eq!(b64_encode(b"Man"), "TWFu");
+        assert_eq!(b64_encode(b"Ma"), "TWE=");
     }
 
     #[test]
