@@ -5,6 +5,7 @@
 //! aléatoire, pour qu'une autre page ouverte dans le navigateur ne puisse pas
 //! déclencher l'appareil.
 
+use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Write};
 use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::path::PathBuf;
@@ -45,6 +46,7 @@ struct Shared {
     zoom_ok: bool,
     liveview_ok: bool,
     focus_ok: bool,
+    thumbs: Mutex<HashMap<u32, Arc<Vec<u8>>>>,
 }
 
 fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -71,6 +73,7 @@ pub fn serve(cam: Camera, listen: SocketAddr, out_dir: PathBuf) -> Result<(), St
         zoom_ok,
         liveview_ok,
         focus_ok,
+        thumbs: Mutex::new(HashMap::new()),
     });
     let listener = TcpListener::bind(listen).map_err(|x| format!("écoute sur {listen} : {x}"))?;
     if !listen.ip().is_loopback() {
@@ -268,6 +271,80 @@ fn handle(mut s: TcpStream, sh: Arc<Shared>) -> std::io::Result<()> {
             };
             respond(&mut s, "200 OK", "application/json", body.as_bytes())
         }
+        ("GET", "/api/photos") => {
+            let off = qnum(query, "offset").unwrap_or(0) as usize;
+            let cnt = qnum(query, "count").unwrap_or(18).min(48) as usize;
+            let r: Result<String, String> = (|| {
+                let mut cam = lock(&sh.cam);
+                let mut hs = cam.object_handles().map_err(|x| x.to_string())?;
+                hs.reverse();
+                let mut items = Vec::new();
+                for h in hs.iter().skip(off).take(cnt) {
+                    if let Ok(o) = cam.object_info(*h) {
+                        if o.format == OFC_ASSOCIATION {
+                            continue;
+                        }
+                        items.push(format!(
+                            "{{\"h\":{h},\"name\":{},\"size\":{},\"w\":{},\"ht\":{},\"date\":{},\"movie\":{}}}",
+                            json_str(&o.filename), o.size, o.width, o.height, json_str(&o.capture_date),
+                            o.format == 0x300D || o.format == 0x300A
+                        ));
+                    }
+                }
+                Ok(format!("{{\"total\":{},\"items\":[{}]}}", hs.len(), items.join(",")))
+            })();
+            match r {
+                Ok(b) => respond(&mut s, "200 OK", "application/json", b.as_bytes()),
+                Err(m) => respond(&mut s, "200 OK", "application/json", format!("{{\"error\":{}}}", json_str(&m)).as_bytes()),
+            }
+        }
+        ("GET", "/api/thumb") => {
+            let h = qnum(query, "h").unwrap_or(0);
+            let cached = lock(&sh.thumbs).get(&h).cloned();
+            let t = match cached {
+                Some(t) => Some(t),
+                None => lock(&sh.cam).get_thumb(h).ok().map(|d| {
+                    let d = Arc::new(d);
+                    lock(&sh.thumbs).insert(h, d.clone());
+                    d
+                }),
+            };
+            match t {
+                Some(t) if !t.is_empty() => respond(&mut s, "200 OK", "image/jpeg", &t),
+                _ => respond(&mut s, "404 Not Found", "text/plain", b""),
+            }
+        }
+        ("GET", "/api/photo") => {
+            let h = qnum(query, "h").unwrap_or(0);
+            let mut data = Vec::new();
+            let r = lock(&sh.cam).get_object(h, &mut data);
+            match r {
+                Ok(()) => respond(&mut s, "200 OK", "image/jpeg", &data),
+                Err(x) => respond(&mut s, "502 Bad Gateway", "text/plain; charset=utf-8", x.to_string().as_bytes()),
+            }
+        }
+        ("POST", "/api/save") => {
+            let h = qnum(query, "h").unwrap_or(0);
+            let r = {
+                let mut cam = lock(&sh.cam);
+                download(&mut cam, h, &sh.out_dir, false, false)
+            };
+            let body = match r {
+                Ok(p) => format!("{{\"ok\":true,\"file\":{}}}", json_str(&p.map(|p| p.display().to_string()).unwrap_or_default())),
+                Err(m) => format!("{{\"ok\":false,\"error\":{}}}", json_str(&m)),
+            };
+            respond(&mut s, "200 OK", "application/json", body.as_bytes())
+        }
+        ("POST", "/api/delete") => {
+            let h = qnum(query, "h").unwrap_or(0);
+            let r = lock(&sh.cam).delete_object(h);
+            lock(&sh.thumbs).remove(&h);
+            let body = match r {
+                Ok(()) => "{\"ok\":true}".to_string(),
+                Err(x) => format!("{{\"ok\":false,\"error\":{}}}", json_str(&x.to_string())),
+            };
+            respond(&mut s, "200 OK", "application/json", body.as_bytes())
+        }
         ("POST", "/api/focus") => {
             let r: Result<(), String> = if !sh.focus_ok {
                 Err("mise au point à distance non annoncée par l'appareil".into())
@@ -284,7 +361,7 @@ fn handle(mut s: TcpStream, sh: Arc<Shared>) -> std::io::Result<()> {
             let items: Vec<String> = {
                 let mut cam = lock(&sh.cam);
                 let codes = all_props(&mut cam);
-                codes.into_iter().filter_map(|c| cam.prop_desc(c).ok()).map(|d| prop_json(&d)).collect()
+                codes.into_iter().filter(|c| !HIDDEN_PROPS.contains(c)).filter_map(|c| cam.prop_desc(c).ok()).map(|d| prop_json(&d)).collect()
             };
             respond(&mut s, "200 OK", "application/json", format!("[{}]", items.join(",")).as_bytes())
         }
@@ -311,6 +388,18 @@ fn capture_af(cam: &mut Camera) -> Result<(Option<u32>, Duration), String> {
         r => r,
     }
 }
+
+fn qnum(query: &str, key: &str) -> Option<u32> {
+    let v = query_param(query, key)?;
+    match v.strip_prefix("0x") {
+        Some(h) => u32::from_str_radix(h, 16).ok(),
+        None => v.parse().ok(),
+    }
+}
+
+/// Réglages jamais proposés : identifiant d'appairage Wi-Fi Nikon (une mauvaise
+/// valeur pourrait bloquer la connexion). L'horloge a son propre bouton.
+const HIDDEN_PROPS: &[u16] = &[0xD24F];
 
 fn value_json(v: &Value) -> String {
     match v {
@@ -376,6 +465,9 @@ fn set_prop_from_query(sh: &Shared, query: &str) -> Result<Value, String> {
         .ok_or("paramètre code manquant")?;
     let raw = percent_decode(query_param(query, "value").ok_or("paramètre value manquant")?);
     let mut cam = lock(&sh.cam);
+    if HIDDEN_PROPS.contains(&code) {
+        return Err("réglage protégé (appairage Wi-Fi)".into());
+    }
     let d = cam.prop_desc(code).map_err(|x| x.to_string())?;
     if !d.writable {
         return Err("réglage en lecture seule sur cet appareil".into());

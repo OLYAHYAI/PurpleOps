@@ -404,6 +404,12 @@ impl Camera {
         Ok(())
     }
 
+    /// Supprime un objet de la carte (DeleteObject).
+    pub fn delete_object(&mut self, handle: u32) -> Result<()> {
+        self.call(OC_DELETE_OBJECT, &[handle, 0])?;
+        Ok(())
+    }
+
     pub fn get_thumb(&mut self, handle: u32) -> Result<Vec<u8>> {
         Ok(self.call(OC_GET_THUMB, &[handle])?.data)
     }

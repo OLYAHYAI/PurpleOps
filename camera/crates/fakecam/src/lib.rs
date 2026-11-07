@@ -109,13 +109,10 @@ impl State {
                 code: DPC_FOCAL_LENGTH,
                 dtype: dataset::DT_UINT32,
                 writable: true,
-                factory: Value::U32(430),
-                current: Value::U32(430),
-                form: Form::Range {
-                    min: Value::U32(430),
-                    max: Value::U32(35700),
-                    step: Value::U32(1),
-                },
+                factory: Value::U32(3500),
+                current: Value::U32(3500),
+                // Relevé sur une P900 (firmware 1.5) : 7 crans.
+                form: Form::Enum([3500, 4600, 5300, 6100, 7300, 8600, 10500].map(Value::U32).to_vec()),
             },
         );
         props.insert(
@@ -127,6 +124,28 @@ impl State {
                 factory: Value::U16(2),
                 current: Value::U16(2),
                 form: Form::Enum(vec![Value::U16(1), Value::U16(2), Value::U16(3), Value::U16(4)]),
+            },
+        );
+        props.insert(
+            0x500C,
+            PropDesc {
+                code: 0x500C,
+                dtype: dataset::DT_UINT16,
+                writable: true,
+                factory: Value::U16(1),
+                current: Value::U16(2),
+                form: Form::Enum(vec![Value::U16(1), Value::U16(2), Value::U16(3), Value::U16(4)]),
+            },
+        );
+        props.insert(
+            0x5011,
+            PropDesc {
+                code: 0x5011,
+                dtype: dataset::DT_STR,
+                writable: true,
+                factory: Value::Str(String::new()),
+                current: Value::Str("20261107T224810".into()),
+                form: Form::None,
             },
         );
         State {
@@ -163,6 +182,7 @@ impl State {
                 OC_SET_DEVICE_PROP_VALUE,
                 OC_NIKON_CHECK_EVENT,
                 OC_NIKON_AF_DRIVE,
+                OC_DELETE_OBJECT,
                 OC_NIKON_DEVICE_READY,
                 OC_NIKON_GET_VENDOR_PROP_CODES,
                 OC_NIKON_START_LIVEVIEW,
@@ -171,7 +191,7 @@ impl State {
                 OC_NIKON_INITIATE_CAPTURE_REC_IN_MEDIA,
             ],
             events: vec![EC_OBJECT_ADDED, EC_DEVICE_PROP_CHANGED, EC_CAPTURE_COMPLETE],
-            properties: vec![DPC_BATTERY_LEVEL, DPC_FOCAL_LENGTH, DPC_EXPOSURE_PROGRAM],
+            properties: vec![DPC_BATTERY_LEVEL, DPC_FOCAL_LENGTH, DPC_EXPOSURE_PROGRAM, 0x500C, 0x5011],
             capture_formats: vec![0x3801],
             image_formats: vec![0x3801, 0x3808],
             manufacturer: "Nikon Corporation".into(),
@@ -268,6 +288,11 @@ impl State {
             }
             OC_NIKON_DEVICE_READY => ok(None),
             OC_NIKON_AF_DRIVE => ok(None),
+            OC_DELETE_OBJECT => {
+                let before = self.objects.len();
+                self.objects.retain(|(h, _)| *h != p0);
+                if self.objects.len() < before { ok(None) } else { (RC_INVALID_OBJECT_HANDLE, vec![], None, None) }
+            }
             OC_NIKON_GET_LIVEVIEW_IMG if !self.liveview => (RC_NIKON_NOT_LIVEVIEW, vec![], None, None),
             OC_NIKON_GET_LIVEVIEW_IMG => {
                 // En-tête de 128 octets (taille arbitraire, variable selon les modèles Nikon), puis JPEG.
@@ -310,6 +335,11 @@ impl State {
         if let Form::Range { min, max, .. } = &d.form {
             let (n, lo, hi) = (v.as_i128(), min.as_i128(), max.as_i128());
             if n < lo || n > hi {
+                return (RC_INVALID_DEVICE_PROP_VALUE, vec![], None, None);
+            }
+        }
+        if let Form::Enum(allowed) = &d.form {
+            if !allowed.contains(&v) {
                 return (RC_INVALID_DEVICE_PROP_VALUE, vec![], None, None);
             }
         }
