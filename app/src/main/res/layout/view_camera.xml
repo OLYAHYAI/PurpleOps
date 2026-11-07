@@ -4,6 +4,30 @@
     android:layout_height="match_parent"
     android:orientation="vertical">
 
+    <!-- Écran USB : partage/pilotage de l'écran depuis le PC par le câble (screenctl). -->
+    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:orientation="vertical" android:paddingBottom="14dp">
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:orientation="horizontal" android:gravity="center_vertical">
+            <LinearLayout android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content"
+                android:orientation="vertical">
+                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+                    android:text="Écran USB — pilotage depuis le PC" android:textColor="@color/neon"
+                    android:textStyle="bold" android:textSize="18sp" android:letterSpacing="0.05" />
+                <TextView android:id="@+id/scrStatus" android:layout_width="match_parent" android:layout_height="wrap_content"
+                    android:text="—" android:textColor="@color/muted" android:textSize="12sp" />
+            </LinearLayout>
+            <TextView android:id="@+id/scrToggle" android:layout_width="wrap_content" android:layout_height="wrap_content"
+                android:background="@drawable/btn_accent" android:gravity="center"
+                android:paddingStart="18dp" android:paddingEnd="18dp" android:paddingTop="10dp" android:paddingBottom="10dp"
+                android:text="ACTIVER" android:textColor="@color/text" android:textStyle="bold" android:textSize="13sp" />
+        </LinearLayout>
+        <TextView android:id="@+id/scrInfo" android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:layout_marginTop="8dp" android:background="@drawable/bg_console" android:padding="10dp"
+            android:fontFamily="monospace" android:textSize="13sp" android:textColor="@color/console_text"
+            android:textIsSelectable="true" android:visibility="gone" />
+    </LinearLayout>
+
     <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
         android:paddingBottom="4dp" android:text="Caméra — Nikon P900" android:textColor="@color/neon"
         android:textStyle="bold" android:textSize="18sp" android:letterSpacing="0.05" />

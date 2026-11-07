@@ -10,7 +10,7 @@ Client PC : [`../../pc-client/screenview`](../../pc-client/screenview).
 ## État : incrément 1 — image fixe + toucher
 
 - Capture d'une trame via `screencap` (RGBA brut), envoyée au PC à la demande.
-- Toucher injecté via `input tap x y`.
+- Toucher, balayage, Retour/Accueil via `input`.
 - Transport TCP lié à la **seule interface de partage USB**.
 - Jeton 32 hex régénéré à chaque démarrage, exigé à la connexion.
 - Journal `/data/local/soc/screenctl.log` (ingéré par l'agent Wazuh).
@@ -18,37 +18,42 @@ Client PC : [`../../pc-client/screenview`](../../pc-client/screenview).
 Suite prévue : uinput (latence/multitouch), flux MJPEG puis H.264 (`screenrecord`),
 presse-papiers et fichiers. Voir le tableau d'incréments dans `ETUDE.md`.
 
-## Mise en route (test de l'incrément 1)
+## Mise en route
 
-### 1. Lien USB
-Sur le téléphone : **Paramètres → Partage de connexion → Partage par USB** (ON).
-Le téléphone prend l'adresse **192.168.42.129** sur l'interface `rndis0` (ou `ncm0`).
-Vérifier le nom exact : `ip -4 addr | grep -E 'rndis|ncm'`.
+### Téléphone
+Onglet **Matériel → Écran USB → ACTIVER** (désactivé par défaut). Le service, lancé
+en root côté Android (pas dans Kali) :
+1. passe la prise USB en carte réseau NCM (`svc usb setFunctions ncm`) ;
+2. attend qu'Android donne une adresse à `ncm0` (le partage de connexion tire un
+   sous-réseau au hasard, ex. 10.235.168.229/24, et fait le DHCP du PC) ;
+3. écoute sur cette seule interface et affiche **adresse + jeton**.
 
-### 2. Démarrer le service (root), comme `p900ctl`
-Le binaire est embarqué dans l'APK sous `libscreenctl.so`. Lancement root :
+**ARRÊTER** tue le service et remet la prise en mode normal (`screenctl usb-off`).
 
-```sh
-BIN=$(dirname "$(pm path com.jbr.purpleops | head -1 | sed 's/package://')")/lib/arm64/libscreenctl.so
-# pm path renvoie .../base.apk ; les .so sont extraits à côté, dans lib/arm64/
-su -c "exec '$BIN' serve --iface rndis0 --listen 192.168.42.129:8099"
-```
+Prérequis matériel : câble **de données**, et le téléphone doit être
+« contrôlé par l'appareil connecté » (Réglages → USB). Avec un câble C↔C, si le
+téléphone se met en maître, utiliser un port USB-A du PC.
 
-Le service affiche :
+### PC (Windows 11, pilote NCM intégré, rien à installer)
+`screenview.exe` est attaché à chaque Release GitHub. Double-clic ou :
 ```
-SCREENCTL token=<32 hex> listen=192.168.42.129:8099 iface=rndis0
-Jeton de session : <32 hex>
+screenview.exe <jeton>
 ```
-Note le jeton.
+L'adresse du téléphone est trouvée seule (passerelle de la carte « UsbNcm Host
+Device »). Le jeton est demandé s'il manque.
 
-### 3. Client PC (Windows)
-```
-cd camera\pc-client\screenview
-cargo run --release -- 192.168.42.129 8099 <le jeton>
-```
-Une fenêtre affiche l'écran du téléphone. **Clic gauche = toucher** au point
-correspondant. Le titre et la console affichent **img/s** et **latence aller-retour**.
-Échap pour quitter.
+| Souris | Action sur le téléphone |
+| --- | --- |
+| clic gauche | toucher |
+| glisser (gauche) | balayage / défilement |
+| clic droit | Retour |
+| clic molette | Accueil |
+
+Échap ferme la fenêtre. Le titre affiche img/s et latence.
+
+### Mesure incrément 1 (Pixel 7a, 1080x2400, RGBA brut)
+≈ 2,4 img/s, latence aller-retour ≈ 390 ms (dominée par `screencap` + 10 Mo/image).
+Référence avant MJPEG / H.264.
 
 ## Sécurité
 

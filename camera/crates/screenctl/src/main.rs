@@ -16,7 +16,13 @@
 //!     0x00 PING       -> réponse 1 octet 0x00
 //!     0x01 GET_FRAME  -> réponse : u32 w, u32 h, u32 bpp, u32 len, [len octets RGBA]
 //!     0x02 TAP        : u32 x, u32 y  -> réponse 1 octet 0x00
+//!     0x03 SWIPE      : u32 x1, y1, x2, y2, ms  -> réponse 1 octet 0x00
+//!     0x04 KEY        : u32 keycode Android (4 = Retour, 3 = Accueil…) -> 0x00
 //!   Tout opcode inconnu ferme la connexion.
+//!
+//! Lien USB : `serve --usb` passe la prise USB en carte réseau NCM (`svc usb
+//! setFunctions ncm`), attend que le PC l'ait prise en charge et que l'interface
+//! ait une adresse, puis écoute dessus. `usb-off` remet la prise en mode normal.
 
 use std::fs::{File, OpenOptions};
 use std::io::{self, Read, Write};
@@ -35,10 +41,12 @@ const HELP: &str = "\
 screenctl — partage/pilotage de l'écran Android par câble USB (root, PurpleOps)
 
 Usage : screenctl serve [OPTIONS]
+        screenctl usb-off            remet la prise USB en mode normal
 
 Options :
-  --listen ADR:PORT   adresse d'écoute (défaut : <IP tether>:8099, sinon 0.0.0.0:8099)
-  --iface NOM         lie la socket à cette seule interface (ex. rndis0, ncm0 ; root)
+  --usb               monte le lien : prise USB en carte réseau NCM, attend l'adresse
+  --listen ADR:PORT   adresse d'écoute (défaut : <IP de --iface>:8099)
+  --iface NOM         lie la socket à cette seule interface (défaut avec --usb : ncm0)
   --log FICHIER       journal des connexions (défaut /data/local/soc/screenctl.log)
   -h, --help          cette aide
 
@@ -47,14 +55,28 @@ dans l'appli). La socket doit rester liée au lien USB — jamais au Wi-Fi.";
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
+    if args.first().map(String::as_str) == Some("usb-off") {
+        usb_functions("");
+        println!("Prise USB remise en mode normal.");
+        return ExitCode::SUCCESS;
+    }
     if args.iter().any(|a| a == "-h" || a == "--help") || args.first().map(String::as_str) != Some("serve") {
         eprintln!("{HELP}");
         return if args.first().map(String::as_str) == Some("serve") { ExitCode::SUCCESS } else { ExitCode::FAILURE };
     }
 
+    let usb = args.iter().any(|a| a == "--usb");
     let listen = opt(&args, "--listen");
-    let iface = opt(&args, "--iface");
+    let iface = opt(&args, "--iface").or_else(|| usb.then(|| "ncm0".to_string()));
     let log_path = opt(&args, "--log").unwrap_or_else(|| DEFAULT_LOG.to_string());
+
+    if usb {
+        let name = iface.as_deref().unwrap_or("ncm0");
+        if let Err(e) = usb_link_up(name) {
+            eprintln!("screenctl: {e}");
+            return ExitCode::FAILURE;
+        }
+    }
 
     match run(listen, iface, log_path) {
         Ok(()) => ExitCode::SUCCESS,
@@ -167,12 +189,23 @@ fn serve_client(mut s: TcpStream, token: &str, log: &mut Logger, peer: &str) -> 
                 s.write_all(&pixels)?;
             }
             0x02 => {
-                let mut xy = [0u8; 8];
-                s.read_exact(&mut xy)?;
-                let x = u32::from_be_bytes(xy[0..4].try_into().unwrap());
-                let y = u32::from_be_bytes(xy[4..8].try_into().unwrap());
-                tap(x, y);
-                log.line(&format!("tap {peer} {x},{y}"));
+                let v = read_u32s::<2>(&mut s)?;
+                input(&["tap", &v[0].to_string(), &v[1].to_string()]);
+                log.line(&format!("tap {peer} {},{}", v[0], v[1]));
+                s.write_all(&[0x00])?;
+            }
+            0x03 => {
+                let v = read_u32s::<5>(&mut s)?;
+                let ms = v[4].clamp(50, 3000);
+                let a: Vec<String> = [v[0], v[1], v[2], v[3], ms].iter().map(u32::to_string).collect();
+                input(&["swipe", &a[0], &a[1], &a[2], &a[3], &a[4]]);
+                log.line(&format!("swipe {peer} {},{} -> {},{} {ms}ms", v[0], v[1], v[2], v[3]));
+                s.write_all(&[0x00])?;
+            }
+            0x04 => {
+                let v = read_u32s::<1>(&mut s)?;
+                input(&["keyevent", &v[0].to_string()]);
+                log.line(&format!("key {peer} {}", v[0]));
                 s.write_all(&[0x00])?;
             }
             other => {
@@ -217,15 +250,61 @@ fn capture_frame() -> io::Result<(usize, usize, usize, Vec<u8>)> {
     Ok((w, h, bpp, pixels))
 }
 
-/// Injection d'un toucher (incrément 1 : simple et sans mise en place).
+fn read_u32s<const N: usize>(s: &mut TcpStream) -> io::Result<[u32; N]> {
+    let mut out = [0u32; N];
+    for v in out.iter_mut() {
+        let mut b = [0u8; 4];
+        s.read_exact(&mut b)?;
+        *v = u32::from_be_bytes(b);
+    }
+    Ok(out)
+}
+
+/// Injection via la commande `input` (tap, swipe, keyevent).
 /// L'incrément suivant passera par /dev/uinput pour la latence et le multitouch.
-fn tap(x: u32, y: u32) {
+fn input(args: &[&str]) {
     let _ = Command::new("input")
-        .args(["tap", &x.to_string(), &y.to_string()])
+        .args(args)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .status();
+}
+
+// ---------------------------------------------------------------------------
+// Lien USB (NCM) : la prise USB devient une carte réseau point à point.
+// ---------------------------------------------------------------------------
+
+fn usb_functions(f: &str) {
+    let _ = Command::new("svc")
+        .args(["usb", "setFunctions", f])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status();
+}
+
+/// Passe la prise en NCM puis attend (20 s max) que l'interface ait une IPv4 :
+/// Android la lui donne quand le PC a pris le téléphone en charge.
+fn usb_link_up(iface: &str) -> io::Result<()> {
+    if iface_ipv4(iface).is_some() {
+        println!("Lien USB déjà actif sur {iface}.");
+        return Ok(());
+    }
+    println!("Passage de la prise USB en carte réseau (NCM)…");
+    let _ = io::stdout().flush();
+    usb_functions("ncm");
+    for _ in 0..40 {
+        std::thread::sleep(std::time::Duration::from_millis(500));
+        if let Some(ip) = iface_ipv4(iface) {
+            println!("Lien USB actif : {iface} = {ip}");
+            return Ok(());
+        }
+    }
+    Err(err(format!(
+        "{iface} n'a pas d'adresse après 20 s : câble branché au PC ? câble de données ? \
+         le téléphone doit être « contrôlé par l'appareil connecté » (Réglages > USB)"
+    )))
 }
 
 // ---------------------------------------------------------------------------
