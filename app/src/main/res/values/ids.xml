@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Ancien onglet « Actifs », retiré de la barre du bas ; la vue reste dans le code. -->
+    <item name="nav_assets" type="id" />
+</resources>
