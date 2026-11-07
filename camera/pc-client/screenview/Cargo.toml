@@ -1,0 +1,13 @@
+[package]
+name = "screenview"
+description = "Client PC (Windows) : affiche l'écran du téléphone et renvoie les touchers — scrcpy maison PurpleOps"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+
+[dependencies]
+# Fenêtre + tampon de pixels + souris/clavier, une seule dépendance, multiplateforme.
+minifb = "0.25"
+
+[profile.release]
+opt-level = 2
