@@ -13,3 +13,7 @@ openh264 = "0.9"
 
 [profile.release]
 opt-level = 2
+
+# `--cfg winapi_check` : vérifie le code Win32 depuis Linux (cargo check, sans édition de liens).
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(winapi_check)'] }

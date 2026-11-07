@@ -44,6 +44,9 @@ class CameraPanel(
     private val bin: String get() = act.applicationInfo.nativeLibraryDir + "/libp900ctl.so"
     private val home = "/data/local/tmp/p900ctl"
     private val outDir = "/sdcard/DCIM/P900"
+    // pidof (nom du programme) et non pkill -f : la ligne de commande du shell qui
+    // lance pkill contient aussi « libp900ctl.so », il se tuerait lui-même.
+    private val KILL = "kill \$(pidof libp900ctl.so) 2>/dev/null"
     private val urlRegex = Regex("http://127\\.0\\.0\\.1:8080/\\?t=[0-9a-f]{32}")
 
     init {
@@ -89,7 +92,7 @@ class CameraPanel(
         scope.launch {
             if (wasServing) kotlinx.coroutines.delay(2000)
             val run = "HOME=$home '$bin' --iface wlan0 --timeout 6"
-            val cmd = "mkdir -p $home && $run probe 2>&1; $run props 2>&1"
+            val cmd = "$KILL; mkdir -p $home && $run probe 2>&1; $run props 2>&1"
             val (code, out) = RootRunner.runAndroidRoot(cmd)
             append(out.trim())
             status.text = if (code == 0) "Relevé terminé — détails dans le journal" else "Échec du relevé (code $code)"
@@ -101,7 +104,9 @@ class CameraPanel(
         status.text = "Connexion à l'appareil…"
         scope.launch(Dispatchers.IO) {
             try {
-                val cmd = "mkdir -p $home $outDir && HOME=$home exec '$bin' --iface wlan0 " +
+                // Une visée restée en marche (appli mise à jour ou tuée) garde le port
+                // 8080 : on l'arrête d'abord, sinon « Address already in use ».
+                val cmd = "$KILL; sleep 0.3; mkdir -p $home $outDir && HOME=$home exec '$bin' --iface wlan0 " +
                     "serve --listen 127.0.0.1:8080 --out $outDir 2>&1"
                 val p = ProcessBuilder("su", "-c", cmd).redirectErrorStream(true).start()
                 serveProc = p
@@ -133,6 +138,6 @@ class CameraPanel(
     /** Arrête le service ; le processus root peut survivre à `su`, d'où le pkill. */
     fun stop() {
         serveProc?.destroy()
-        scope.launch { RootRunner.runAndroidRoot("pkill -f libp900ctl.so") }
+        scope.launch { RootRunner.runAndroidRoot(KILL) }
     }
 }
