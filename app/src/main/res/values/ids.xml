@@ -1,5 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- Ancien onglet « Actifs », retiré de la barre du bas ; la vue reste dans le code. -->
+    <!-- Anciens onglets « Actifs » et « Alertes », retirés de la barre du bas
+         (alertes affichées sur l'Accueil) ; les vues restent dans le code. -->
     <item name="nav_assets" type="id" />
+    <item name="nav_alerts" type="id" />
 </resources>

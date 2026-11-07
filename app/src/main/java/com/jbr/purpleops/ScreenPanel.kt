@@ -1,8 +1,12 @@
 package com.jbr.purpleops
 
+import android.content.Context
 import android.view.View
+import android.widget.CheckBox
 import android.widget.ScrollView
 import android.widget.TextView
+import android.widget.Toast
+import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -10,15 +14,15 @@ import kotlinx.coroutines.launch
 import java.io.File
 
 /**
- * Section « Écran USB » : partage et pilotage de l'écran depuis le PC par le câble
- * USB (scrcpy maison), via le binaire Rust screenctl embarqué dans l'APK
- * (lib/arm64/libscreenctl.so).
+ * Onglet « Écran » : écran du téléphone vu et piloté depuis le PC par le câble USB
+ * (scrcpy maison), via le binaire Rust screenctl embarqué (lib/arm64/libscreenctl.so),
+ * lancé en root côté Android (pas dans Kali).
  *
- * Désactivé par défaut. « ACTIVER » lance, en root côté Android (pas dans Kali) :
- *   screenctl serve --usb   -> prise USB en carte réseau NCM, attente de l'adresse,
- *                              écoute sur cette seule interface, jeton aléatoire.
- * La section affiche l'adresse et le jeton à saisir dans screenview.exe.
- * « ARRÊTER » tue le service et remet la prise USB en mode normal.
+ * - ACTIVER : `screenctl serve --usb` (prise USB en carte réseau, réarmement auto).
+ * - APPAIRER UN PC : ouvre 2 min pendant lesquelles un PC inconnu est accepté et
+ *   mémorisé ; ensuite un double-clic sur screenview.exe suffit, sans jeton.
+ * - Démarrage automatique (décoché par défaut) : le service démarre avec l'appli et
+ *   continue de tourner quand on la ferme.
  */
 class ScreenPanel(
     private val act: AppCompatActivity,
@@ -28,74 +32,167 @@ class ScreenPanel(
     private val status: TextView = root.findViewById(R.id.scrStatus)
     private val toggle: TextView = root.findViewById(R.id.scrToggle)
     private val info: TextView = root.findViewById(R.id.scrInfo)
-    private val log: TextView = root.findViewById(R.id.camLog)
-    private val logScroll: ScrollView = root.findViewById(R.id.camLogScroll)
+    private val pairBtn: TextView = root.findViewById(R.id.scrPair)
+    private val forgetBtn: TextView = root.findViewById(R.id.scrForget)
+    private val auto: CheckBox = root.findViewById(R.id.scrAuto)
+    private val pcs: TextView = root.findViewById(R.id.scrPcs)
+    private val log: TextView = root.findViewById(R.id.scrLog)
+    private val logScroll: ScrollView = root.findViewById(R.id.scrLogScroll)
+
+    private val prefs = act.getSharedPreferences("purpleops", Context.MODE_PRIVATE)
+    private val bin: String get() = act.applicationInfo.nativeLibraryDir + "/libscreenctl.so"
+    private val pcsFile = "/data/local/soc/screenctl_pcs"
 
     @Volatile
     private var proc: Process? = null
 
-    private val bin: String get() = act.applicationInfo.nativeLibraryDir + "/libscreenctl.so"
-    private val readyRegex = Regex("SCREENCTL token=([0-9a-f]{32}) listen=([0-9.]+):(\\d+)")
+    /** Service en marche, lancé par nous ou par une instance précédente de l'appli. */
+    @Volatile
+    private var running = false
+
+    // pidof (nom du programme) et non pkill -f : la ligne de commande du shell qui
+    // lance pkill contient aussi « libscreenctl.so », il se tuerait lui-même.
+    private val KILL = "kill \$(pidof libscreenctl.so) 2>/dev/null"
+
+    private val ev = Regex("^SCREENCTL (\\S+)(?: (.*))?$")
 
     init {
-        toggle.setOnClickListener { if (proc == null) start() else stop() }
-        idle(if (File(bin).exists()) "Désactivé — branche le câble au PC puis ACTIVER"
-              else "screenctl absent de cette version de l'APK")
+        auto.isChecked = prefs.getBoolean("screen_auto", false)
+        auto.setOnCheckedChangeListener { _, on -> prefs.edit().putBoolean("screen_auto", on).apply() }
+        toggle.setOnClickListener { if (running) stop() else start() }
+        pairBtn.setOnClickListener { pair() }
+        forgetBtn.setOnClickListener { forget() }
+
+        if (!File(bin).exists()) {
+            setIdle("screenctl absent de cette version de l'APK")
+        } else {
+            setIdle("Désactivé")
+            scope.launch {
+                val (code, _) = RootRunner.runAndroidRoot("pidof libscreenctl.so")
+                if (code == 0) {
+                    running = true
+                    toggle.text = "ARRÊTER"
+                    status.text = "Actif (lancé précédemment)"
+                    info.text = "Sur le PC : double-clic sur screenview.exe."
+                } else if (auto.isChecked) {
+                    start()
+                }
+                refreshPcs()
+            }
+        }
     }
 
-    private fun idle(msg: String) {
+    private fun setIdle(msg: String) {
+        running = false
         status.text = msg
         toggle.text = "ACTIVER"
-        info.visibility = View.GONE
+        info.text = "Branche le câble au PC puis ACTIVER.\nSur le PC : double-clic sur screenview.exe (Release GitHub)."
     }
 
     private fun append(s: String) {
-        log.append("[écran] $s\n")
+        log.append(s + "\n")
         logScroll.post { logScroll.fullScroll(View.FOCUS_DOWN) }
     }
 
     private fun start() {
-        if (!File(bin).exists() || proc != null) return
-        status.text = "Montage du lien USB…"
+        if (!File(bin).exists() || running) return
+        running = true
         toggle.text = "ARRÊTER"
+        status.text = "Démarrage…"
         scope.launch(Dispatchers.IO) {
             try {
                 val p = ProcessBuilder("su", "-c", "exec '$bin' serve --usb 2>&1")
                     .redirectErrorStream(true).start()
                 proc = p
                 p.inputStream.bufferedReader().forEachLine { line ->
-                    val m = readyRegex.find(line)
-                    act.runOnUiThread {
-                        append(line)
-                        if (m != null) {
-                            val (token, ip, port) = m.destructured
-                            status.text = "Actif — en attente du PC"
-                            info.text = "Adresse : $ip   port $port\nJeton : $token\n\n" +
-                                "PC : screenview.exe $token"
-                            info.visibility = View.VISIBLE
-                        } else if (line.contains(" auth ") && line.endsWith(" ok")) {
-                            status.text = "PC connecté"
-                        }
-                    }
+                    act.runOnUiThread { onLine(line) }
                 }
                 val code = p.waitFor()
-                act.runOnUiThread { idle("Service arrêté (code $code)") }
+                act.runOnUiThread { setIdle("Service arrêté (code $code)") }
             } catch (e: Exception) {
-                act.runOnUiThread { append("[erreur] ${e.message}"); idle("Erreur au démarrage") }
+                act.runOnUiThread { append("[erreur] ${e.message}"); setIdle("Erreur au démarrage") }
             } finally {
                 proc = null
             }
         }
     }
 
-    /** Arrête le service ; le processus root peut survivre à `su`, d'où le pkill. */
-    fun stop() {
-        // Jamais lancé : on ne touche pas au mode USB (ex. transfert de fichiers en cours).
-        val p = proc ?: return
-        p.destroy()
+    private fun onLine(line: String) {
+        val m = ev.find(line)
+        if (m == null) {
+            append(line)
+            return
+        }
+        val (what, rest) = m.destructured
+        val host = rest.substringAfter("host=", "")
+        when (what) {
+            "listen" -> {
+                val ip = rest.substringAfter("listen=").substringBefore(':')
+                status.text = "Actif — en attente du PC"
+                info.text = "Téléphone : $ip\nSur le PC : double-clic sur screenview.exe."
+            }
+            "waiting-cable" -> status.text = "En attente du câble USB (branché au PC)…"
+            "link-lost" -> status.text = "Câble débranché — reprise automatique au rebranchement"
+            "connected" -> status.text = "PC connecté : $host"
+            "disconnected" -> status.text = "Actif — $host déconnecté"
+            "paired" -> {
+                Toast.makeText(act, "PC « $host » appairé", Toast.LENGTH_SHORT).show()
+                refreshPcs()
+            }
+            "refused" -> status.text = "PC « $host » refusé : appuie sur APPAIRER UN PC"
+        }
+        append(line.removePrefix("SCREENCTL "))
+    }
+
+    private fun pair() {
+        if (!running) start()
         scope.launch {
-            RootRunner.runAndroidRoot("pkill -f libscreenctl.so; '$bin' usb-off")
-            idle("Désactivé — prise USB remise en mode normal")
+            val (code, out) = RootRunner.runAndroidRoot("'$bin' pair 120")
+            if (code == 0) {
+                status.text = "Appairage ouvert 2 min : lance screenview.exe sur le PC"
+            } else {
+                append("[appairage] ${out.trim()}")
+            }
+        }
+    }
+
+    private fun forget() {
+        AlertDialog.Builder(act)
+            .setTitle("Oublier tous les PC ?")
+            .setMessage("Chaque PC devra être appairé à nouveau.")
+            .setPositiveButton("Oublier") { _, _ ->
+                scope.launch {
+                    RootRunner.runAndroidRoot("'$bin' forget")
+                    refreshPcs()
+                }
+            }
+            .setNegativeButton("Annuler", null)
+            .show()
+    }
+
+    fun refreshPcs() {
+        scope.launch {
+            val (_, out) = RootRunner.runAndroidRoot("cat $pcsFile 2>/dev/null")
+            val names = out.lines().mapNotNull { it.trim().split(Regex("\\s+")).getOrNull(1) }.distinct()
+            pcs.text = if (names.isEmpty()) "PC appairés : aucun" else "PC appairés : " + names.joinToString(", ")
+        }
+    }
+
+    /** ARRÊTER : coupe le service (où qu'il ait été lancé) et rend la prise USB. */
+    fun stop() {
+        proc?.destroy()
+        running = false
+        scope.launch {
+            RootRunner.runAndroidRoot(KILL + "; '$bin' usb-off")
+            setIdle("Désactivé — prise USB remise en mode normal")
+        }
+    }
+
+    /** Fermeture de l'appli : en démarrage automatique, le service continue de tourner. */
+    fun onAppDestroyed() {
+        if (running && !auto.isChecked) {
+            proc?.destroy()
+            scope.launch { RootRunner.runAndroidRoot(KILL + "; '$bin' usb-off") }
         }
     }
 }

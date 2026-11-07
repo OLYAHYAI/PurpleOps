@@ -14,11 +14,6 @@
                 android:background="@drawable/chip_root" android:paddingStart="10dp" android:paddingEnd="10dp" />
         </LinearLayout>
 
-        <!-- Acces a la camera Nikon (la barre du bas est limitee a 5 onglets) -->
-        <TextView android:id="@+id/homeCamera" android:layout_width="match_parent" android:layout_height="wrap_content"
-            android:background="@drawable/tile" android:padding="14dp" android:layout_marginBottom="12dp"
-            android:text="Caméra Nikon P900  ›" android:textColor="@color/cyan" android:textStyle="bold" android:textSize="15sp" />
-
         <!-- Hero statut -->
         <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
             android:orientation="horizontal" android:background="@drawable/hero" android:padding="18dp" android:gravity="center_vertical">
@@ -63,7 +58,7 @@
         </LinearLayout>
 
         <!-- Alertes recentes -->
-        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Alertes recentes"
+        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Alertes (24 h)"
             android:textColor="@color/text" android:textStyle="bold" android:textSize="15sp" android:paddingTop="18dp" android:paddingBottom="6dp" />
         <LinearLayout android:id="@+id/homeAlerts" android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" />
 
