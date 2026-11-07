@@ -90,7 +90,7 @@ class MainActivity : AppCompatActivity() {
         // (et sa mise à jour automatique) de démarrer.
         camera = try { CameraPanel(this, viewCamera, ui) } catch (e: Exception) { null }
         findViewById<View>(R.id.homeCamera).setOnClickListener {
-            if (camera != null) showTab(R.id.viewCamera) else toast("Section caméra indisponible")
+            bottomNav.selectedItemId = R.id.nav_camera
         }
 
         bindKali()
@@ -111,7 +111,7 @@ class MainActivity : AppCompatActivity() {
         viewAssets.visibility = if (id == R.id.nav_assets) View.VISIBLE else View.GONE
         viewKali.visibility = if (id == R.id.nav_kali) View.VISIBLE else View.GONE
         viewSettings.visibility = if (id == R.id.nav_settings) View.VISIBLE else View.GONE
-        viewCamera.visibility = if (id == R.id.viewCamera) View.VISIBLE else View.GONE
+        viewCamera.visibility = if (id == R.id.nav_camera) View.VISIBLE else View.GONE
         if (id == R.id.nav_home || id == R.id.nav_alerts || id == R.id.nav_assets) refreshDashboard()
     }
 
@@ -191,8 +191,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onBackPressed() {
-        if (currentTab == R.id.viewCamera) showTab(R.id.nav_home)
-        else if (currentTab == R.id.nav_kali && level != Level.CATEGORIES) goUp()
+        if (currentTab == R.id.nav_kali && level != Level.CATEGORIES) goUp()
         else if (currentTab != R.id.nav_home) bottomNav.selectedItemId = R.id.nav_home
         else super.onBackPressed()
     }

@@ -2,7 +2,8 @@
 <menu xmlns:android="http://schemas.android.com/apk/res/android">
     <item android:id="@+id/nav_home" android:icon="@drawable/ic_home" android:title="Accueil" />
     <item android:id="@+id/nav_alerts" android:icon="@drawable/ic_alerts" android:title="Alertes" />
-    <item android:id="@+id/nav_assets" android:icon="@drawable/ic_assets" android:title="Actifs" />
+    <!-- Max 5 onglets : « Actifs » laisse sa place à Nikon (la liste reste sur l'Accueil). -->
+    <item android:id="@+id/nav_camera" android:icon="@drawable/ic_camera" android:title="Nikon" />
     <item android:id="@+id/nav_kali" android:icon="@drawable/ic_kali" android:title="Kali" />
     <item android:id="@+id/nav_settings" android:icon="@drawable/ic_settings" android:title="Reglages" />
 </menu>
