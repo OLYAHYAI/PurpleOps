@@ -14,9 +14,10 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use ptpip::codes::*;
+use ptpip::dataset::{self, Form, PropDesc, Value};
 use ptpip::Camera;
 
-use crate::{capture_and_find, download, hex, random_bytes, zoom_target};
+use crate::{all_props, capture_and_find, download, hex, random_bytes, zoom_target};
 
 #[derive(Default)]
 struct Frame {
@@ -43,6 +44,7 @@ struct Shared {
     model: String,
     zoom_ok: bool,
     liveview_ok: bool,
+    focus_ok: bool,
 }
 
 fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -55,6 +57,7 @@ pub fn serve(cam: Camera, listen: SocketAddr, out_dir: PathBuf) -> Result<(), St
     let mut cam = cam;
     let zoom_ok = cam.info.as_ref().is_some_and(|i| i.properties.contains(&DPC_FOCAL_LENGTH))
         && cam.prop_desc(DPC_FOCAL_LENGTH).map(|d| d.writable).unwrap_or(false);
+    let focus_ok = cam.supports(OC_NIKON_AF_DRIVE);
     let token = hex(&random_bytes(16).map_err(|x| format!("jeton : {x}"))?);
     let sh = Arc::new(Shared {
         cam: Mutex::new(cam),
@@ -67,6 +70,7 @@ pub fn serve(cam: Camera, listen: SocketAddr, out_dir: PathBuf) -> Result<(), St
         model,
         zoom_ok,
         liveview_ok,
+        focus_ok,
     });
     let listener = TcpListener::bind(listen).map_err(|x| format!("écoute sur {listen} : {x}"))?;
     if !listen.ip().is_loopback() {
@@ -211,8 +215,8 @@ fn handle(mut s: TcpStream, sh: Arc<Shared>) -> std::io::Result<()> {
             let f = lock(&sh.frame);
             let st = lock(&sh.status);
             let body = format!(
-                "{{\"model\":{},\"liveview\":{},\"zoom\":{},\"fps\":{:.1},\"frames\":{},\"last_file\":{},\"last_error\":{}}}",
-                json_str(&sh.model), sh.liveview_ok, sh.zoom_ok, f.fps, f.seq,
+                "{{\"model\":{},\"liveview\":{},\"zoom\":{},\"focus\":{},\"fps\":{:.1},\"frames\":{},\"last_file\":{},\"last_error\":{}}}",
+                json_str(&sh.model), sh.liveview_ok, sh.zoom_ok, sh.focus_ok, f.fps, f.seq,
                 json_str(&st.last_file), json_str(&st.last_error)
             );
             drop((f, st));
@@ -221,7 +225,7 @@ fn handle(mut s: TcpStream, sh: Arc<Shared>) -> std::io::Result<()> {
         ("POST", "/api/capture") => {
             let r = {
                 let mut cam = lock(&sh.cam);
-                capture_and_find(&mut cam, false).and_then(|(h, dt)| {
+                capture_af(&mut cam).and_then(|(h, dt)| {
                     let h = h.ok_or("aucune nouvelle photo détectée")?;
                     let thumb = cam.get_thumb(h).unwrap_or_default();
                     let file = download(&mut cam, h, &sh.out_dir, false, false)?
@@ -264,8 +268,122 @@ fn handle(mut s: TcpStream, sh: Arc<Shared>) -> std::io::Result<()> {
             };
             respond(&mut s, "200 OK", "application/json", body.as_bytes())
         }
+        ("POST", "/api/focus") => {
+            let r: Result<(), String> = if !sh.focus_ok {
+                Err("mise au point à distance non annoncée par l'appareil".into())
+            } else {
+                lock(&sh.cam).af_drive().map_err(|x| x.to_string())
+            };
+            let body = match r {
+                Ok(()) => "{\"ok\":true,\"msg\":\"Mise au point faite\"}".to_string(),
+                Err(m) => format!("{{\"ok\":false,\"error\":{}}}", json_str(&m)),
+            };
+            respond(&mut s, "200 OK", "application/json", body.as_bytes())
+        }
+        ("GET", "/api/props") => {
+            let items: Vec<String> = {
+                let mut cam = lock(&sh.cam);
+                let codes = all_props(&mut cam);
+                codes.into_iter().filter_map(|c| cam.prop_desc(c).ok()).map(|d| prop_json(&d)).collect()
+            };
+            respond(&mut s, "200 OK", "application/json", format!("[{}]", items.join(",")).as_bytes())
+        }
+        ("POST", "/api/prop") => {
+            let r = set_prop_from_query(&sh, query);
+            let body = match r {
+                Ok(v) => format!("{{\"ok\":true,\"current\":{}}}", value_json(&v)),
+                Err(m) => format!("{{\"ok\":false,\"error\":{}}}", json_str(&m)),
+            };
+            respond(&mut s, "200 OK", "application/json", body.as_bytes())
+        }
         _ => respond(&mut s, "404 Not Found", "text/plain", b""),
     }
+}
+
+/// Déclenche avec autofocus ; si l'appareil refuse ce paramètre ou ne fait
+/// pas le point, nouvel essai sans autofocus.
+fn capture_af(cam: &mut Camera) -> Result<(Option<u32>, Duration), String> {
+    match capture_and_find(cam, true) {
+        Err(m) if m.contains("InitiateCapture") => {
+            eprintln!("déclenchement avec autofocus refusé ({m}) ; nouvel essai sans autofocus");
+            capture_and_find(cam, false)
+        }
+        r => r,
+    }
+}
+
+fn value_json(v: &Value) -> String {
+    match v {
+        Value::Str(s) => json_str(s),
+        v => match v.as_i128() {
+            Some(n) => n.to_string(),
+            None => json_str(&v.to_string()),
+        },
+    }
+}
+
+fn prop_json(d: &PropDesc) -> String {
+    let form = match &d.form {
+        Form::Range { min, max, step } => format!(
+            "{{\"kind\":\"range\",\"min\":{},\"max\":{},\"step\":{}}}",
+            value_json(min), value_json(max), value_json(step)
+        ),
+        Form::Enum(v) => format!(
+            "{{\"kind\":\"enum\",\"values\":[{}]}}",
+            v.iter().map(value_json).collect::<Vec<_>>().join(",")
+        ),
+        _ => "{\"kind\":\"none\"}".to_string(),
+    };
+    format!(
+        "{{\"code\":{},\"hex\":\"{:#06x}\",\"name\":{},\"type\":{},\"writable\":{},\"current\":{},\"form\":{}}}",
+        d.code,
+        d.code,
+        json_str(prop_name(d.code).unwrap_or("")),
+        json_str(&dataset::dtype_name(d.dtype)),
+        d.writable,
+        value_json(&d.current),
+        form
+    )
+}
+
+fn percent_decode(s: &str) -> String {
+    let b = s.as_bytes();
+    let mut out = Vec::with_capacity(b.len());
+    let mut i = 0;
+    while i < b.len() {
+        match b[i] {
+            b'+' => out.push(b' '),
+            b'%' if i + 2 < b.len() => {
+                let hexv = |c: u8| (c as char).to_digit(16).map(|d| d as u8);
+                match hexv(b[i + 1]).zip(hexv(b[i + 2])).map(|(h, l)| h * 16 + l).ok_or(()) {
+                    Ok(x) => {
+                        out.push(x);
+                        i += 2;
+                    }
+                    Err(_) => out.push(b'%'),
+                }
+            }
+            c => out.push(c),
+        }
+        i += 1;
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
+
+fn set_prop_from_query(sh: &Shared, query: &str) -> Result<Value, String> {
+    let code: u16 = query_param(query, "code")
+        .and_then(|c| c.parse().ok())
+        .ok_or("paramètre code manquant")?;
+    let raw = percent_decode(query_param(query, "value").ok_or("paramètre value manquant")?);
+    let mut cam = lock(&sh.cam);
+    let d = cam.prop_desc(code).map_err(|x| x.to_string())?;
+    if !d.writable {
+        return Err("réglage en lecture seule sur cet appareil".into());
+    }
+    let v = dataset::parse_value(d.dtype, &raw)?;
+    cam.set_prop(code, &v).map_err(|x| x.to_string())?;
+    thread::sleep(Duration::from_millis(200));
+    cam.prop_value(code, d.dtype).map_err(|x| x.to_string())
 }
 
 fn stream(mut s: TcpStream, sh: &Shared) -> std::io::Result<()> {
@@ -319,16 +437,23 @@ button{font:inherit;font-size:17px;padding:16px 0;border-radius:12px;border:1px 
 button:disabled{opacity:.35}#shoot{background:var(--acc);border-color:var(--acc);color:#fff;font-weight:600}
 #msg{padding:0 16px;min-height:1.4em;color:var(--mute);font-size:13px}
 #last{display:block;max-width:40%;margin:12px 16px;border-radius:8px}
+.bar2{display:grid;grid-template-columns:1fr 1fr;gap:12px;padding:0 16px 12px}.bar2 button{font-size:15px;padding:12px 0}
+#props{padding:0 16px 16px}.row{border-top:1px solid var(--line);padding:10px 0}.row b{font-weight:600}
+.row small{color:var(--mute);margin-left:6px}.ctl{display:flex;gap:8px;margin-top:6px}
+.ctl select,.ctl input{flex:1;font:inherit;padding:8px;border-radius:8px;border:1px solid var(--line);background:var(--btn);color:var(--fg)}
+.ctl button{font-size:14px;padding:8px 14px}
 </style></head><body>
 <header><h1>__MODEL__</h1><span id="st">…</span></header>
 <div id="view"><img id="lv" alt="Visée"></div>
 <div class="bar"><button id="zout">W −</button><button id="shoot">Déclencher</button><button id="zin">T +</button></div>
+<div class="bar2"><button id="focus">Mise au point</button><button id="settings">Réglages</button></div>
+<div id="props" hidden></div>
 <p id="msg"></p><img id="last" hidden alt="Dernière photo">
 <script>
 const T="__TOKEN__",q=p=>p+(p.includes("?")?"&":"?")+"t="+T,$=id=>document.getElementById(id);
 async function st(){try{const s=await (await fetch(q("/api/status"))).json();
 $("st").textContent=s.liveview?s.fps.toFixed(1)+" i/s":"visée non disponible";
-$("zin").disabled=$("zout").disabled=!s.zoom;if(s.last_error)$("msg").textContent=s.last_error;
+$("zin").disabled=$("zout").disabled=!s.zoom;$("focus").disabled=!s.focus;if(s.last_error)$("msg").textContent=s.last_error;
 if(s.liveview&&!$("lv").src)$("lv").src=q("/stream.mjpg");}catch(e){$("st").textContent="hors ligne"}}
 async function post(p,busy){$("msg").textContent=busy;const r=await (await fetch(q(p),{method:"POST"})).json();
 $("msg").textContent=r.ok?(r.file?"Enregistrée : "+r.file+" ("+r.ms+" ms)":"Focale : "+r.focal):r.error;return r}
@@ -336,6 +461,23 @@ $("shoot").onclick=async()=>{$("shoot").disabled=true;const r=await post("/api/c
 if(r.ok){$("last").src=q("/last.jpg?"+Date.now());$("last").hidden=false}$("shoot").disabled=false;
 $("lv").src="";setTimeout(()=>{$("lv").src=q("/stream.mjpg")},300)};
 $("zin").onclick=()=>post("/api/zoom?dir=in","Zoom…");$("zout").onclick=()=>post("/api/zoom?dir=out","Zoom…");
+$("focus").onclick=async()=>{$("msg").textContent="Mise au point…";const r=await (await fetch(q("/api/focus"),{method:"POST"})).json();$("msg").textContent=r.ok?r.msg:r.error};
+const U={20487:v=>"f/"+(v/100),20488:v=>(v/100)+" mm",20493:v=>v>=10000?(v/10000)+" s":"1/"+Math.round(10000/v)+" s",20496:v=>(v/1000)+" IL"};
+const fmt=(c,v)=>U[c]&&typeof v=="number"?v+" ("+U[c](v)+")":String(v);
+function row(p){const d=document.createElement("div");d.className="row";
+const t=document.createElement("div");const b=document.createElement("b");b.textContent=p.name||p.hex;t.appendChild(b);
+const sm=document.createElement("small");sm.textContent=p.hex+" · "+fmt(p.code,p.current)+(p.writable?"":" · lecture seule");t.appendChild(sm);d.appendChild(t);
+if(p.writable&&p.form.kind!="none"){const c=document.createElement("div");c.className="ctl";let inp;
+if(p.form.kind=="enum"){inp=document.createElement("select");p.form.values.forEach(v=>{const o=document.createElement("option");o.value=v;o.textContent=fmt(p.code,v);if(v===p.current)o.selected=true;inp.appendChild(o)})}
+else{inp=document.createElement("input");inp.type="number";inp.min=p.form.min;inp.max=p.form.max;inp.step=p.form.step;inp.value=p.current}
+const go=document.createElement("button");go.textContent="Appliquer";
+go.onclick=async()=>{$("msg").textContent="Réglage…";const r=await (await fetch(q("/api/prop?code="+p.code+"&value="+encodeURIComponent(inp.value)),{method:"POST"})).json();
+if(r.ok){p.current=r.current;sm.textContent=p.hex+" · "+fmt(p.code,r.current);$("msg").textContent=(p.name||p.hex)+" = "+fmt(p.code,r.current)}else $("msg").textContent=r.error};
+c.appendChild(inp);c.appendChild(go);d.appendChild(c)}return d}
+$("settings").onclick=async()=>{const box=$("props");if(!box.hidden){box.hidden=true;return}
+box.textContent="Lecture des réglages…";box.hidden=false;try{const ps=await (await fetch(q("/api/props"))).json();box.textContent="";
+const w=ps.filter(p=>p.writable),r=ps.filter(p=>!p.writable);const h=document.createElement("p");h.className="row";
+h.textContent=w.length+" réglages modifiables, "+r.length+" en lecture seule";box.appendChild(h);w.concat(r).forEach(p=>box.appendChild(row(p)))}catch(e){box.textContent="Erreur : "+e}};
 st();setInterval(st,1000);
 </script></body></html>
 "##;
