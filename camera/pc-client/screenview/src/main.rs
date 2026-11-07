@@ -1,66 +1,133 @@
-//! screenview — client PC (Windows) du partage d'écran USB de PurpleOps.
+//! screenview — client PC (Windows) de l'écran USB de PurpleOps.
 //!
-//! Affiche l'écran du téléphone et renvoie les gestes de la souris :
-//!   clic gauche  = toucher        glisser (bouton gauche) = balayage / défilement
-//!   clic droit   = Retour         clic molette            = Accueil
-//!   Échap        = quitter
+//! Double-clic suffit : le téléphone est trouvé tout seul (passerelle de la carte
+//! « UsbNcm »), et ce PC s'identifie par une clé qu'il garde dans
+//! %APPDATA%\PurpleOps\screenview.key. La première fois, appuie sur « APPAIRER UN
+//! PC » dans PurpleOps : la connexion se fait d'elle-même dans les 2 minutes.
 //!
-//! Deux modes :
-//!   défaut   flux H.264 (encodeur matériel du téléphone via `screenrecord`),
-//!            décodé ici par OpenH264 — fluide, quelques Mo/s ;
-//!   --raw    images brutes RGBA à la demande (incrément 1, pour comparer).
+//! Souris : gauche = doigt (toucher, glisser, appui long) · molette = défiler ·
+//!          droit = Retour · milieu = Accueil
+//! Clavier : texte, Entrée, Effacer, flèches, Ctrl+A/C/V/X/Z… · Échap = Retour
 //!
-//! Usage : screenview [JETON] [HOTE] [PORT] [--raw] [--mbps N]  (ordre libre)
-//!   JETON  les 32 hex affichés dans PurpleOps ; demandé s'il manque
-//!   HOTE   trouvée automatiquement (passerelle de la carte « UsbNcm »)
-//!   PORT   défaut 8099 ;  --mbps  débit vidéo demandé (défaut 8)
-//!
-//! Protocole « PPSCR1 » : voir crates/screenctl/src/main.rs.
+//! Options : [HOTE] [PORT] [--mbps N]
+//! Protocole « PPSCR2 » : voir crates/screenctl/src/main.rs.
 
 use std::io::{self, BufRead, Read, Write};
 use std::net::TcpStream;
-use std::sync::mpsc::{self, Receiver, Sender};
+use std::path::PathBuf;
+use std::sync::mpsc::{self, Sender};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use minifb::{Key, MouseButton, MouseMode, Window, WindowOptions};
+use minifb::{InputCallback, Key, KeyRepeat, MouseButton, MouseMode, Window, WindowOptions};
 use openh264::decoder::Decoder;
 use openh264::formats::YUVSource;
 
-const PROTO: &[u8] = b"PPSCR1 ";
-const MAX_FRAME: usize = 64 * 1024 * 1024;
-/// Hauteur max de la fenêtre PC ; l'image est remise à l'échelle sous ce plafond.
+const PROTO: &str = "PPSCR2";
 const MAX_WIN_H: usize = 960;
-/// Au-delà de ce déplacement (pixels téléphone), un clic devient un balayage.
-const SWIPE_MIN: f32 = 30.0;
-const KEY_HOME: u32 = 3;
-const KEY_BACK: u32 = 4;
+const MAX_FRAME: usize = 16 << 20;
+
+// Codes clavier Linux (le téléphone les reçoit tels quels via uinput).
+const KEY_BACK: u32 = 158;
+const KEY_HOMEPAGE: u32 = 172;
+const MOD_SHIFT: u32 = 1;
+const MOD_CTRL: u32 = 2;
+const MOD_ALT: u32 = 4;
 
 fn main() {
-    let code = match real_main() {
-        Ok(()) => 0,
-        Err(e) => {
-            eprintln!("\nscreenview : {e}");
-            1
+    if let Err(e) = real_main() {
+        eprintln!("\nscreenview : {e}");
+        eprintln!("\nAppuie sur Entrée pour fermer.");
+        let _ = io::stdin().lock().read_line(&mut String::new());
+        std::process::exit(1);
+    }
+}
+
+fn real_main() -> io::Result<()> {
+    let (mut host, mut port, mut mbps) = (None, 8099u16, 8u32);
+    let mut args = std::env::args().skip(1);
+    while let Some(a) = args.next() {
+        if a == "--mbps" {
+            mbps = args.next().and_then(|v| v.parse().ok()).unwrap_or(8);
+        } else if let Ok(p) = a.parse::<u16>() {
+            port = p;
+        } else if a.len() != 32 {
+            host = Some(a); // (un ancien jeton de 32 hex passé en argument est ignoré)
         }
-    };
-    eprintln!("\nAppuie sur Entrée pour fermer.");
-    let _ = io::stdin().lock().read_line(&mut String::new());
-    std::process::exit(code);
+    }
+    let key = load_or_create_key()?;
+    let name = std::env::var("COMPUTERNAME").unwrap_or_else(|_| "PC".into());
+
+    // Boucle de vie : (re)connexion automatique, le programme peut rester ouvert.
+    let mut last_msg = String::new();
+    loop {
+        let say = |m: &str, last: &mut String| {
+            if m != last {
+                println!("{m}");
+                *last = m.to_string();
+            }
+        };
+        let h = match host.clone().or_else(find_phone) {
+            Some(h) => h,
+            None => {
+                say("En attente du téléphone (câble USB branché, Écran USB activé dans PurpleOps)…", &mut last_msg);
+                thread::sleep(Duration::from_secs(2));
+                continue;
+            }
+        };
+        match connect(&h, port, &key, &name) {
+            Ok(Conn::Ok(s)) => {
+                last_msg.clear();
+                println!("Connecté à {h}:{port}.");
+                match session(s, mbps) {
+                    Ok(true) => return Ok(()), // fenêtre fermée par l'utilisateur
+                    Ok(false) => println!("Connexion perdue, nouvelle tentative…"),
+                    Err(e) => println!("Connexion perdue ({e}), nouvelle tentative…"),
+                }
+            }
+            Ok(Conn::NotPaired) => say(
+                "Ce PC n'est pas encore autorisé. Sur le téléphone : PurpleOps > Écran USB > APPAIRER UN PC. \
+                 (la connexion se fera toute seule)",
+                &mut last_msg,
+            ),
+            Err(_) => say(
+                &format!("Téléphone {h} trouvé, service pas encore démarré : PurpleOps > Écran USB > ACTIVER…"),
+                &mut last_msg,
+            ),
+        }
+        thread::sleep(Duration::from_secs(2));
+    }
 }
 
-/// Image prête à afficher : déjà à la taille de la fenêtre (0x00RRGGBB).
-struct Shown {
-    buf: Vec<u32>,
+enum Conn {
+    Ok(TcpStream),
+    NotPaired,
 }
 
-/// Géométrie téléphone <-> fenêtre, fixée à la première image.
+fn connect(host: &str, port: u16, key: &str, name: &str) -> io::Result<Conn> {
+    let addr = format!("{host}:{port}");
+    let sa = addr.parse().map_err(|_| err("adresse invalide"))?;
+    let mut s = TcpStream::connect_timeout(&sa, Duration::from_secs(2))?;
+    s.set_nodelay(true)?;
+    s.set_read_timeout(Some(Duration::from_secs(10)))?;
+    s.write_all(format!("{PROTO} {key} {name}\n").as_bytes())?;
+    let mut st = [0u8; 1];
+    s.read_exact(&mut st)?;
+    if st[0] != 0 {
+        return Ok(Conn::NotPaired);
+    }
+    Ok(Conn::Ok(s))
+}
+
+/// Image prête à afficher, déjà à la taille de la fenêtre (0x00RRGGBB).
+type Shown = Arc<Mutex<Option<Vec<u32>>>>;
+
 #[derive(Clone, Copy)]
 struct Geo {
-    dw: usize,
+    dw: usize, // écran du téléphone (coordonnées tactiles)
     dh: usize,
-    ww: usize,
+    ww: usize, // fenêtre
     wh: usize,
 }
 
@@ -70,365 +137,318 @@ impl Geo {
         Geo { dw, dh, ww: (dw as f32 / f).round() as usize, wh: (dh as f32 / f).round() as usize }
     }
     fn to_dev(self, p: (f32, f32)) -> (u32, u32) {
-        let x = (p.0 * self.dw as f32 / self.ww as f32) as usize;
-        let y = (p.1 * self.dh as f32 / self.wh as f32) as usize;
+        let x = (p.0 * self.dw as f32 / self.ww as f32).max(0.0) as usize;
+        let y = (p.1 * self.dh as f32 / self.wh as f32).max(0.0) as usize;
         (x.min(self.dw - 1) as u32, y.min(self.dh - 1) as u32)
     }
-    /// Réduit une image RGB(A) (stride = largeur * bpp) en tampon fenêtre.
-    fn scale(&self, px: &[u8], bpp: usize, out: &mut [u32]) {
-        let row = self.dw * bpp;
-        for wy in 0..self.wh {
-            let sy = wy * self.dh / self.wh;
-            for wx in 0..self.ww {
-                let i = sy * row + (wx * self.dw / self.ww) * bpp;
-                out[wy * self.ww + wx] = (px[i] as u32) << 16 | (px[i + 1] as u32) << 8 | px[i + 2] as u32;
-            }
-        }
-    }
 }
 
-enum Cmd {
-    Tap(u32, u32),
-    Swipe(u32, u32, u32, u32, u32),
-    Key(u32),
+/// Événements envoyés au téléphone (sans réponse).
+enum Ev {
+    Down(u32, u32),
+    Move(u32, u32),
+    Up,
+    Key(u32, u32),
+    Text(String),
+    Scroll(u32, u32, i32),
 }
 
-impl Cmd {
+impl Ev {
     fn encode(&self) -> Vec<u8> {
-        let (op, vals): (u8, Vec<u32>) = match *self {
-            Cmd::Tap(x, y) => (0x02, vec![x, y]),
-            Cmd::Swipe(a, b, c, d, ms) => (0x03, vec![a, b, c, d, ms]),
-            Cmd::Key(k) => (0x04, vec![k]),
+        let mut m = Vec::new();
+        let mut put = |op: u8, v: &[u32]| {
+            m.push(op);
+            for x in v {
+                m.extend_from_slice(&x.to_be_bytes());
+            }
         };
-        let mut m = vec![op];
-        for v in vals {
-            m.extend_from_slice(&v.to_be_bytes());
+        match self {
+            Ev::Down(x, y) => put(0x10, &[*x, *y]),
+            Ev::Move(x, y) => put(0x11, &[*x, *y]),
+            Ev::Up => put(0x12, &[]),
+            Ev::Key(c, mods) => put(0x20, &[*c, *mods]),
+            Ev::Text(t) => {
+                put(0x21, &[t.len() as u32]);
+                m.extend_from_slice(t.as_bytes());
+            }
+            Ev::Scroll(x, y, dy) => put(0x30, &[*x, *y, *dy as u32]),
         }
         m
     }
 }
 
-fn real_main() -> io::Result<()> {
-    let (mut token, mut host, mut port, mut raw, mut mbps) = (None, None, 8099u16, false, 8u32);
-    let mut args = std::env::args().skip(1);
-    while let Some(a) = args.next() {
-        if a == "--raw" {
-            raw = true;
-        } else if a == "--mbps" {
-            mbps = args.next().and_then(|v| v.parse().ok()).unwrap_or(8);
-        } else if a.len() == 32 && a.chars().all(|c| c.is_ascii_hexdigit()) {
-            token = Some(a.to_ascii_lowercase());
-        } else if let Ok(p) = a.parse::<u16>() {
-            port = p;
-        } else {
-            host = Some(a);
+/// Caractères tapés (disposition du PC déjà appliquée par Windows).
+struct Chars(Sender<char>);
+impl InputCallback for Chars {
+    fn add_char(&mut self, c: u32) {
+        if let Some(ch) = char::from_u32(c) {
+            if !ch.is_control() {
+                let _ = self.0.send(ch);
+            }
         }
     }
-    let host = match host {
-        Some(h) => h,
-        None => match find_phone() {
-            Some(h) => {
-                println!("Téléphone trouvé automatiquement : {h}");
-                h
-            }
-            None => prompt("Adresse du téléphone (affichée dans PurpleOps) : ")?,
-        },
-    };
-    let token = match token {
-        Some(t) => t,
-        None => prompt("Jeton affiché dans PurpleOps (32 caractères) : ")?.to_ascii_lowercase(),
-    };
-    if token.len() != 32 || !token.chars().all(|c| c.is_ascii_hexdigit()) {
-        return Err(err("jeton invalide : 32 caractères 0-9 a-f attendus"));
+}
+
+/// Une session : renvoie Ok(true) si l'utilisateur a fermé la fenêtre.
+fn session(mut s: TcpStream, mbps: u32) -> io::Result<bool> {
+    s.write_all(&[0x05])?;
+    s.write_all(&(mbps.clamp(1, 40) * 1_000_000).to_be_bytes())?;
+    let dw = read_u32(&mut s)? as usize;
+    let dh = read_u32(&mut s)? as usize;
+    if dw == 0 || dh == 0 {
+        return Err(err("taille d'écran invalide"));
     }
+    s.set_read_timeout(None)?;
+    let geo = Geo::new(dw, dh);
 
-    let mut s = TcpStream::connect((host.as_str(), port))
-        .map_err(|e| err(&format!("connexion à {host}:{port} impossible ({e}) — service activé ? câble branché ?")))?;
-    s.set_nodelay(true)?;
-    s.write_all(PROTO)?;
-    s.write_all(token.as_bytes())?;
-    s.write_all(b"\n")?;
-
-    let shown: Arc<Mutex<Option<Shown>>> = Arc::new(Mutex::new(None));
-    let stats: Arc<Mutex<String>> = Arc::new(Mutex::new(String::new()));
-    let (geo_tx, geo_rx) = mpsc::channel::<Geo>();
-
-    // Envoi des gestes : en flux, écriture directe (pas d'accusé) ; en brut, via
-    // le fil réseau qui intercale les gestes entre deux images.
-    let (cmd_tx, cmd_rx) = mpsc::channel::<Cmd>();
-    if raw {
-        s.set_read_timeout(Some(Duration::from_secs(10)))?;
-        let (sh, st) = (shown.clone(), stats.clone());
+    let shown: Shown = Arc::new(Mutex::new(None));
+    let stats = Arc::new(Mutex::new(String::new()));
+    let alive = Arc::new(Mutex::new(true));
+    {
+        let (r, sh, st, al) = (s.try_clone()?, shown.clone(), stats.clone(), alive.clone());
         thread::spawn(move || {
-            if let Err(e) = raw_loop(s, cmd_rx, geo_tx, sh, st) {
-                eprintln!("Connexion perdue : {e}");
+            if let Err(e) = video_loop(r, geo, sh, st) {
+                eprintln!("Flux interrompu : {e}");
             }
+            *al.lock().unwrap() = false;
         });
-    } else {
-        s.write_all(&[0x05])?;
-        s.write_all(&(mbps.clamp(1, 40) * 1_000_000).to_be_bytes())?;
+    }
+    let (ev_tx, ev_rx) = mpsc::channel::<Ev>();
+    {
         let mut w = s.try_clone()?;
         thread::spawn(move || {
-            for c in cmd_rx {
-                if w.write_all(&c.encode()).is_err() {
+            for e in ev_rx {
+                if w.write_all(&e.encode()).is_err() {
                     break;
                 }
             }
         });
-        let (sh, st) = (shown.clone(), stats.clone());
-        thread::spawn(move || {
-            if let Err(e) = h264_loop(s, geo_tx, sh, st) {
-                eprintln!("Flux interrompu : {e}");
-            }
-        });
     }
-
-    println!("Connecté à {host}:{port} ({}). Attente de la première image…", if raw { "brut" } else { "H.264" });
-    let geo = geo_rx
-        .recv_timeout(Duration::from_secs(15))
-        .map_err(|_| err("aucune image reçue en 15 s : jeton refusé, ou écran éteint ?"))?;
-    println!("Écran {}x{}, fenêtre {}x{}.", geo.dw, geo.dh, geo.ww, geo.wh);
 
     let mut win = Window::new("PurpleOps — écran USB", geo.ww, geo.wh, WindowOptions::default())
         .map_err(|e| err(&format!("fenêtre : {e}")))?;
-    win.limit_update_rate(Some(Duration::from_millis(8))); // ~120 Hz : souris réactive
+    win.limit_update_rate(Some(Duration::from_millis(6)));
+    let (ch_tx, ch_rx) = mpsc::channel::<char>();
+    win.set_input_callback(Box::new(Chars(ch_tx)));
     let mut buf = vec![0u32; geo.ww * geo.wh];
 
-    let mut press: Option<((f32, f32), Instant)> = None;
+    let mut finger: Option<(u32, u32)> = None;
     let (mut prev_r, mut prev_m) = (false, false);
-    let mut last_title = String::new();
+    let mut title = String::new();
 
-    while win.is_open() && !win.is_key_down(Key::Escape) {
-        let pos = win.get_mouse_pos(MouseMode::Clamp);
+    while win.is_open() {
+        if !*alive.lock().unwrap() {
+            return Ok(false);
+        }
+        // Doigt virtuel = bouton gauche : appui, déplacements, relâchement.
+        let pos = win.get_mouse_pos(MouseMode::Clamp).map(|p| geo.to_dev(p));
         let left = win.get_mouse_down(MouseButton::Left);
-        match (left, press, pos) {
-            (true, None, Some(p)) => press = Some((p, Instant::now())),
-            (false, Some((start, t0)), Some(end)) => {
-                let (x1, y1) = geo.to_dev(start);
-                let (x2, y2) = geo.to_dev(end);
-                let dist = ((x2 as f32 - x1 as f32).powi(2) + (y2 as f32 - y1 as f32).powi(2)).sqrt();
-                let _ = cmd_tx.send(if dist < SWIPE_MIN {
-                    Cmd::Tap(x1, y1)
-                } else {
-                    Cmd::Swipe(x1, y1, x2, y2, t0.elapsed().as_millis() as u32)
-                });
-                press = None;
+        match (left, finger, pos) {
+            (true, None, Some(p)) => {
+                let _ = ev_tx.send(Ev::Down(p.0, p.1));
+                finger = Some(p);
             }
-            (false, Some(_), None) => press = None,
+            (true, Some(f), Some(p)) if f != p => {
+                let _ = ev_tx.send(Ev::Move(p.0, p.1));
+                finger = Some(p);
+            }
+            (false, Some(_), _) => {
+                let _ = ev_tx.send(Ev::Up);
+                finger = None;
+            }
             _ => {}
+        }
+        if let (Some((_, dy)), Some(p)) = (win.get_scroll_wheel(), pos) {
+            if dy != 0.0 && finger.is_none() {
+                // Un cran de molette ≈ 1/8 d'écran ; molette vers soi = descendre.
+                let px = (dy.signum() * (geo.dh as f32 / 8.0)) as i32;
+                let _ = ev_tx.send(Ev::Scroll(p.0, p.1, px));
+            }
         }
         let right = win.get_mouse_down(MouseButton::Right);
         if right && !prev_r {
-            let _ = cmd_tx.send(Cmd::Key(KEY_BACK));
+            let _ = ev_tx.send(Ev::Key(KEY_BACK, 0));
         }
         prev_r = right;
         let middle = win.get_mouse_down(MouseButton::Middle);
         if middle && !prev_m {
-            let _ = cmd_tx.send(Cmd::Key(KEY_HOME));
+            let _ = ev_tx.send(Ev::Key(KEY_HOMEPAGE, 0));
         }
         prev_m = middle;
 
+        // Clavier : touches spéciales et raccourcis par code, texte par caractères.
+        let ctrl = win.is_key_down(Key::LeftCtrl) || win.is_key_down(Key::RightCtrl);
+        let alt = win.is_key_down(Key::LeftAlt) || win.is_key_down(Key::RightAlt);
+        let shift = win.is_key_down(Key::LeftShift) || win.is_key_down(Key::RightShift);
+        let altgr = ctrl && alt; // AltGr = Ctrl+Alt sous Windows : c'est du texte
+        for k in win.get_keys_pressed(KeyRepeat::Yes) {
+            let mods = (shift as u32 * MOD_SHIFT) | (ctrl as u32 * MOD_CTRL) | (alt as u32 * MOD_ALT);
+            if let Some(code) = special_key(k) {
+                let _ = ev_tx.send(Ev::Key(code, if altgr { 0 } else { mods }));
+            } else if (ctrl || alt) && !altgr {
+                if let Some(code) = letter_key(k) {
+                    let _ = ev_tx.send(Ev::Key(code, mods));
+                }
+            }
+        }
+        let typed: String = ch_rx.try_iter().collect();
+        if !typed.is_empty() && !((ctrl || alt) && !altgr) {
+            let _ = ev_tx.send(Ev::Text(typed));
+        }
+
         if let Some(f) = shown.lock().unwrap().take() {
-            buf = f.buf;
+            buf = f;
         }
         let st = stats.lock().unwrap().clone();
-        if st != last_title && !st.is_empty() {
-            win.set_title(&format!("PurpleOps — {st}  [clic droit = Retour, molette = Accueil, Échap = quitter]"));
-            last_title = st;
+        if st != title && !st.is_empty() {
+            win.set_title(&format!("PurpleOps — {st}"));
+            title = st;
         }
         win.update_with_buffer(&buf, geo.ww, geo.wh).map_err(|e| err(&format!("maj fenêtre : {e}")))?;
     }
-    println!("Fermeture.");
-    Ok(())
+    let _ = s.shutdown(std::net::Shutdown::Both);
+    Ok(true)
 }
 
-/// Mode flux : lit le H.264 Annex-B, découpe en unités NAL, décode, réduit, publie.
-///
-/// Une NAL est complète quand le code de début suivant arrive. Pour ne pas garder
-/// la dernière en otage (écran immobile = plus rien n'arrive), si le câble reste
-/// muet 4 ms on considère la fin du tampon comme complète : `screenrecord` écrit
-/// chaque image d'un bloc, et sur l'USB les morceaux d'un même bloc se suivent
-/// à quelques microsecondes.
-fn h264_loop(mut s: TcpStream, geo_tx: Sender<Geo>, shown: Arc<Mutex<Option<Shown>>>, stats: Arc<Mutex<String>>) -> io::Result<()> {
-    let mut st = H264State {
-        dec: Decoder::new().map_err(|e| err(&format!("décodeur H.264 : {e}")))?,
-        geo: None,
-        geo_tx,
-        shown,
-        rgb: Vec::new(),
-        frames: 0,
-        errors: 0,
-        dec_time: Duration::ZERO,
-    };
-    s.set_read_timeout(Some(Duration::from_millis(4)))?;
-    let mut pending: Vec<u8> = Vec::with_capacity(1 << 20);
-    let mut chunk = vec![0u8; 256 * 1024];
-    let mut bytes = 0usize;
+/// Images H.264 délimitées par le téléphone (u32 taille + image) : décodage
+/// direct, réduction à la taille de la fenêtre, publication de la dernière.
+fn video_loop(mut s: TcpStream, geo: Geo, shown: Shown, stats: Arc<Mutex<String>>) -> io::Result<()> {
+    let mut dec = Decoder::new().map_err(|e| err(&format!("décodeur H.264 : {e}")))?;
+    let mut rgb: Vec<u8> = Vec::new();
+    let mut au: Vec<u8> = Vec::new();
+    let (mut frames, mut errors, mut bytes, mut dec_time) = (0u32, 0u32, 0usize, Duration::ZERO);
     let mut since = Instant::now();
-
     loop {
-        match s.read(&mut chunk) {
-            Ok(0) => return Err(err("le téléphone a fermé le flux")),
-            Ok(n) => {
-                bytes += n;
-                pending.extend_from_slice(&chunk[..n]);
-                let starts = start_codes(&pending);
-                if starts.len() >= 2 {
-                    for w in starts.windows(2) {
-                        st.decode(&pending[w[0]..w[1]]);
-                    }
-                    let last = *starts.last().unwrap();
-                    pending.drain(..last);
-                }
-            }
-            Err(e) if matches!(e.kind(), io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut) => {
-                // Silence : la NAL en attente est complète.
-                if let Some(&first) = start_codes(&pending).first() {
-                    st.decode(&pending[first..]);
-                    pending.clear();
-                }
-            }
-            Err(e) => return Err(e),
+        let len = read_u32(&mut s)? as usize;
+        if len > MAX_FRAME {
+            return Err(err("image annoncée trop grande"));
         }
+        au.resize(len, 0);
+        s.read_exact(&mut au)?;
+        bytes += len + 4;
+
+        let t0 = Instant::now();
+        match dec.decode(&au) {
+            Ok(Some(yuv)) => {
+                let (w, h) = yuv.dimensions();
+                rgb.resize(w * h * 3, 0);
+                yuv.write_rgb8(&mut rgb);
+                let mut out = vec![0u32; geo.ww * geo.wh];
+                for wy in 0..geo.wh {
+                    let row = (wy * h / geo.wh) * w * 3;
+                    for wx in 0..geo.ww {
+                        let i = row + (wx * w / geo.ww) * 3;
+                        out[wy * geo.ww + wx] = (rgb[i] as u32) << 16 | (rgb[i + 1] as u32) << 8 | rgb[i + 2] as u32;
+                    }
+                }
+                *shown.lock().unwrap() = Some(out);
+                frames += 1;
+            }
+            Ok(None) => {}
+            Err(_) => errors += 1,
+        }
+        dec_time += t0.elapsed();
 
         if since.elapsed() >= Duration::from_secs(1) {
             let secs = since.elapsed().as_secs_f64();
             let mut line = format!(
-                "H.264 {:.0} img/s, {:.1} Mbit/s, décodage {:.1} ms/img",
-                st.frames as f64 / secs,
+                "{:.0} img/s · {:.1} Mbit/s · décodage {:.1} ms",
+                frames as f64 / secs,
                 bytes as f64 * 8.0 / secs / 1e6,
-                if st.frames > 0 { st.dec_time.as_secs_f64() * 1000.0 / st.frames as f64 } else { 0.0 }
+                if frames > 0 { dec_time.as_secs_f64() * 1000.0 / frames as f64 } else { 0.0 }
             );
-            if st.errors > 0 {
-                line += &format!(", {} erreurs de décodage (essayer --raw)", st.errors);
+            if errors > 0 {
+                line += &format!(" · {errors} erreurs");
             }
-            println!("{line}");
             *stats.lock().unwrap() = line;
-            (st.frames, st.errors, st.dec_time, bytes) = (0, 0, Duration::ZERO, 0);
+            (frames, errors, bytes, dec_time) = (0, 0, 0, Duration::ZERO);
             since = Instant::now();
         }
     }
 }
 
-struct H264State {
-    dec: Decoder,
-    geo: Option<Geo>,
-    geo_tx: Sender<Geo>,
-    shown: Arc<Mutex<Option<Shown>>>,
-    rgb: Vec<u8>,
-    frames: u32,
-    errors: u32,
-    dec_time: Duration,
+/// Touches spéciales PC -> codes Linux.
+fn special_key(k: Key) -> Option<u32> {
+    Some(match k {
+        Key::Escape => KEY_BACK,
+        Key::Backspace => 14,
+        Key::Tab => 15,
+        Key::Enter | Key::NumPadEnter => 28,
+        Key::Delete => 111,
+        Key::Home => 102,
+        Key::End => 107,
+        Key::PageUp => 104,
+        Key::PageDown => 109,
+        Key::Up => 103,
+        Key::Down => 108,
+        Key::Left => 105,
+        Key::Right => 106,
+        _ => return None,
+    })
 }
 
-impl H264State {
-    fn decode(&mut self, nal: &[u8]) {
-        let t0 = Instant::now();
-        match self.dec.decode(nal) {
-            Ok(Some(yuv)) => {
-                let (w, h) = yuv.dimensions();
-                let tx = &self.geo_tx;
-                let g = *self.geo.get_or_insert_with(|| {
-                    let g = Geo::new(w, h);
-                    let _ = tx.send(g);
-                    g
-                });
-                if (w, h) == (g.dw, g.dh) {
-                    self.rgb.resize(w * h * 3, 0);
-                    yuv.write_rgb8(&mut self.rgb);
-                    let mut out = vec![0u32; g.ww * g.wh];
-                    g.scale(&self.rgb, 3, &mut out);
-                    *self.shown.lock().unwrap() = Some(Shown { buf: out });
-                    self.frames += 1;
-                }
-            }
-            Ok(None) => {}
-            Err(_) => self.errors += 1,
-        }
-        self.dec_time += t0.elapsed();
-    }
+/// Lettres pour les raccourcis Ctrl/Alt (Ctrl+A, Ctrl+C…), disposition US côté téléphone.
+fn letter_key(k: Key) -> Option<u32> {
+    use Key::*;
+    let l = [
+        (A, 30), (B, 48), (C, 46), (D, 32), (E, 18), (F, 33), (G, 34), (H, 35), (I, 23), (J, 36), (K, 37),
+        (L, 38), (M, 50), (N, 49), (O, 24), (P, 25), (Q, 16), (R, 19), (S, 31), (T, 20), (U, 22), (V, 47),
+        (W, 17), (X, 45), (Y, 21), (Z, 44),
+    ];
+    l.iter().find(|(key, _)| *key == k).map(|(_, c)| *c)
 }
 
-/// Positions des codes de début Annex-B (00 00 01, précédé ou non d'un 00).
-fn start_codes(b: &[u8]) -> Vec<usize> {
-    let mut v = Vec::new();
-    let mut i = 0;
-    while i + 3 <= b.len() {
-        if b[i] == 0 && b[i + 1] == 0 && b[i + 2] == 1 {
-            v.push(if i > 0 && b[i - 1] == 0 { i - 1 } else { i });
-            i += 3;
-        } else {
-            i += 1;
+/// Clé d'identification de ce PC (64 hex), créée au premier lancement.
+fn load_or_create_key() -> io::Result<String> {
+    let dir = std::env::var_os("APPDATA").map(PathBuf::from).unwrap_or_else(|| PathBuf::from(".")).join("PurpleOps");
+    let path = dir.join("screenview.key");
+    if let Ok(k) = std::fs::read_to_string(&path) {
+        let k = k.trim().to_string();
+        if k.len() == 64 && k.chars().all(|c| c.is_ascii_hexdigit()) {
+            return Ok(k);
         }
     }
-    v
+    std::fs::create_dir_all(&dir)?;
+    let k: String = random32()?.iter().map(|b| format!("{b:02x}")).collect();
+    std::fs::write(&path, &k)?;
+    Ok(k)
 }
 
-/// Mode brut (incrément 1) : gestes en attente, puis une image, en boucle.
-fn raw_loop(mut s: TcpStream, rx: Receiver<Cmd>, geo_tx: Sender<Geo>, shown: Arc<Mutex<Option<Shown>>>, stats: Arc<Mutex<String>>) -> io::Result<()> {
-    let mut geo: Option<Geo> = None;
-    let (mut frames, mut lat_sum) = (0u32, Duration::ZERO);
-    let mut since = Instant::now();
-    loop {
-        while let Ok(c) = rx.try_recv() {
-            s.write_all(&c.encode())?;
-            let mut ack = [0u8; 1];
-            s.read_exact(&mut ack)?;
-        }
-        let t0 = Instant::now();
-        s.write_all(&[0x01])?;
-        let (w, h, bpp, len) = (read_u32(&mut s)? as usize, read_u32(&mut s)? as usize, read_u32(&mut s)? as usize, read_u32(&mut s)? as usize);
-        if len > MAX_FRAME {
-            return Err(err("image annoncée trop grande"));
-        }
-        let mut px = vec![0u8; len];
-        s.read_exact(&mut px)?;
-        lat_sum += t0.elapsed();
-        if w == 0 || h == 0 || bpp != 4 || len < w * h * 4 {
-            continue;
-        }
-        let g = *geo.get_or_insert_with(|| {
-            let g = Geo::new(w, h);
-            let _ = geo_tx.send(g);
-            g
-        });
-        let mut out = vec![0u32; g.ww * g.wh];
-        g.scale(&px, 4, &mut out);
-        *shown.lock().unwrap() = Some(Shown { buf: out });
-
-        frames += 1;
-        if since.elapsed() >= Duration::from_secs(1) {
-            let line = format!(
-                "brut {:.1} img/s, latence {:.0} ms",
-                frames as f64 / since.elapsed().as_secs_f64(),
-                lat_sum.as_secs_f64() * 1000.0 / frames as f64
-            );
-            println!("{line}");
-            *stats.lock().unwrap() = line;
-            (frames, lat_sum) = (0, Duration::ZERO);
-            since = Instant::now();
-        }
+#[cfg(windows)]
+fn random32() -> io::Result<[u8; 32]> {
+    #[link(name = "bcrypt")]
+    extern "system" {
+        fn BCryptGenRandom(alg: *mut std::ffi::c_void, buf: *mut u8, len: u32, flags: u32) -> i32;
     }
+    let mut b = [0u8; 32];
+    // BCRYPT_USE_SYSTEM_PREFERRED_RNG = 2
+    if unsafe { BCryptGenRandom(std::ptr::null_mut(), b.as_mut_ptr(), 32, 2) } != 0 {
+        return Err(err("générateur aléatoire Windows indisponible"));
+    }
+    Ok(b)
+}
+
+#[cfg(not(windows))]
+fn random32() -> io::Result<[u8; 32]> {
+    let mut b = [0u8; 32];
+    std::fs::File::open("/dev/urandom")?.read_exact(&mut b)?;
+    Ok(b)
 }
 
 /// Adresse du téléphone = passerelle que son DHCP a donnée à la carte UsbNcm.
 fn find_phone() -> Option<String> {
     let ps = "(Get-NetIPConfiguration | Where-Object { $_.InterfaceDescription -like '*NCM*' -or \
               $_.InterfaceDescription -like '*NDIS*' } | Select-Object -First 1).IPv4DefaultGateway.NextHop";
-    let out = std::process::Command::new("powershell")
-        .args(["-NoProfile", "-NonInteractive", "-Command", ps])
-        .output()
-        .ok()?;
+    let mut cmd = std::process::Command::new("powershell");
+    cmd.args(["-NoProfile", "-NonInteractive", "-Command", ps]);
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
+    }
+    let out = cmd.output().ok()?;
     let s = String::from_utf8_lossy(&out.stdout).trim().to_string();
     s.parse::<std::net::Ipv4Addr>().ok().map(|ip| ip.to_string())
-}
-
-fn prompt(q: &str) -> io::Result<String> {
-    print!("{q}");
-    io::stdout().flush()?;
-    let mut l = String::new();
-    io::stdin().lock().read_line(&mut l)?;
-    Ok(l.trim().to_string())
 }
 
 fn read_u32(s: &mut TcpStream) -> io::Result<u32> {
@@ -446,17 +466,18 @@ mod tests {
     use super::*;
 
     #[test]
-    fn start_codes_3_and_4_bytes() {
-        let b = [0, 0, 0, 1, 0x67, 9, 0, 0, 1, 0x68, 0, 0, 0, 1, 0x65];
-        assert_eq!(start_codes(&b), vec![0, 6, 10]);
-    }
-
-    #[test]
     fn geo_maps_corners() {
         let g = Geo::new(1080, 2400);
         assert_eq!(g.wh, MAX_WIN_H);
         assert_eq!(g.to_dev((0.0, 0.0)), (0, 0));
-        let (x, y) = g.to_dev((g.ww as f32, g.wh as f32));
-        assert_eq!((x, y), (1079, 2399));
+        assert_eq!(g.to_dev((g.ww as f32, g.wh as f32)), (1079, 2399));
+    }
+
+    #[test]
+    fn events_encode() {
+        assert_eq!(Ev::Up.encode(), vec![0x12]);
+        assert_eq!(Ev::Down(1, 2).encode(), vec![0x10, 0, 0, 0, 1, 0, 0, 0, 2]);
+        assert_eq!(Ev::Text("ab".into()).encode(), vec![0x21, 0, 0, 0, 2, b'a', b'b']);
+        assert_eq!(Ev::Scroll(0, 0, -1).encode()[9..], [0xff, 0xff, 0xff, 0xff]);
     }
 }

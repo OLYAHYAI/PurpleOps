@@ -21,6 +21,8 @@
             android:layout_width="match_parent" android:layout_height="match_parent" />
         <include android:id="@+id/viewKali" layout="@layout/view_kali"
             android:layout_width="match_parent" android:layout_height="match_parent" />
+        <include android:id="@+id/viewScreen" layout="@layout/view_screen"
+            android:layout_width="match_parent" android:layout_height="match_parent" />
         <include android:id="@+id/viewCamera" layout="@layout/view_camera"
             android:layout_width="match_parent" android:layout_height="match_parent" />
         <include android:id="@+id/viewSettings" layout="@layout/view_settings"

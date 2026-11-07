@@ -38,6 +38,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var viewKali: View
     private lateinit var viewSettings: View
     private lateinit var viewCamera: View
+    private lateinit var viewScreen: View
     private var camera: CameraPanel? = null
     private var screen: ScreenPanel? = null
     private lateinit var bottomNav: BottomNavigationView
@@ -87,13 +88,11 @@ class MainActivity : AppCompatActivity() {
         viewKali = findViewById(R.id.viewKali)
         viewSettings = findViewById(R.id.viewSettings)
         viewCamera = findViewById(R.id.viewCamera)
+        viewScreen = findViewById(R.id.viewScreen)
         // Une erreur dans la section caméra ne doit jamais empêcher l'appli
         // (et sa mise à jour automatique) de démarrer.
         camera = try { CameraPanel(this, viewCamera, ui) } catch (e: Exception) { null }
-        screen = try { ScreenPanel(this, viewCamera, ui) } catch (e: Exception) { null }
-        findViewById<View>(R.id.homeCamera).setOnClickListener {
-            bottomNav.selectedItemId = R.id.nav_camera
-        }
+        screen = try { ScreenPanel(this, viewScreen, ui) } catch (e: Exception) { null }
 
         bindKali()
         bindSettings()
@@ -114,6 +113,8 @@ class MainActivity : AppCompatActivity() {
         viewKali.visibility = if (id == R.id.nav_kali) View.VISIBLE else View.GONE
         viewSettings.visibility = if (id == R.id.nav_settings) View.VISIBLE else View.GONE
         viewCamera.visibility = if (id == R.id.nav_camera) View.VISIBLE else View.GONE
+        viewScreen.visibility = if (id == R.id.nav_screen) View.VISIBLE else View.GONE
+        if (id == R.id.nav_screen) screen?.refreshPcs()
         if (id == R.id.nav_home || id == R.id.nav_alerts || id == R.id.nav_assets) refreshDashboard()
     }
 
@@ -319,7 +320,7 @@ class MainActivity : AppCompatActivity() {
         for ((i, a) in s.alerts.withIndex()) {
             val dot = if (a.level >= 10) "#FF5C7A" else if (a.level >= 7) "#FFB454" else "#5CF2FF"
             val sub = "${a.agent} · niveau ${a.level}"
-            if (i < 5) addListItem(homeAlerts, dot, a.desc, sub)
+            addListItem(homeAlerts, dot, a.desc, sub)
             addListItem(allAlerts, dot, a.desc, sub)
         }
 
@@ -450,6 +451,6 @@ class MainActivity : AppCompatActivity() {
         super.onDestroy()
         RootRunner.stop()
         camera?.stop()
-        screen?.stop()
+        screen?.onAppDestroyed()
     }
 }
