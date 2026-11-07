@@ -1,6 +1,8 @@
 [workspace]
 resolver = "2"
-members = ["crates/ptpip", "crates/p900ctl", "crates/fakecam"]
+members = ["crates/ptpip", "crates/p900ctl", "crates/fakecam", "crates/screenctl"]
+# Le client PC (Windows) n'est pas compilé pour arm64 : on l'exclut du workspace.
+exclude = ["pc-client/screenview"]
 
 [workspace.package]
 version = "0.1.0"

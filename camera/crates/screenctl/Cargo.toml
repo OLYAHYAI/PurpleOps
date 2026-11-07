@@ -1,0 +1,10 @@
+[package]
+name = "screenctl"
+description = "Partage et pilotage de l'écran Android par câble USB (scrcpy maison, root) — service téléphone de PurpleOps"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+# std pur : aucune dépendance, comme p900ctl.
+[dependencies]

@@ -41,6 +41,13 @@ jobs:
           mkdir -p app/src/main/jniLibs/arm64-v8a
           cp camera/target/aarch64-linux-android/release/p900ctl app/src/main/jniLibs/arm64-v8a/libp900ctl.so
 
+      # Service de partage d'écran USB (scrcpy maison) : même embarquement arm64.
+      - name: Build screenctl (partage ecran USB)
+        run: |
+          export CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER="$ANDROID_NDK_LATEST_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android33-clang"
+          cargo build --manifest-path camera/Cargo.toml --release -p screenctl --target aarch64-linux-android
+          cp camera/target/aarch64-linux-android/release/screenctl app/src/main/jniLibs/arm64-v8a/libscreenctl.so
+
       # versionCode = numero de build (monotone) ; versionName = 0.1.<build>.
       - name: Build debug APK
         run: >
