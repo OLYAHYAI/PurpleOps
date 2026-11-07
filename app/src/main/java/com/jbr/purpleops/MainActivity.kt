@@ -39,6 +39,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var viewSettings: View
     private lateinit var viewCamera: View
     private var camera: CameraPanel? = null
+    private var screen: ScreenPanel? = null
     private lateinit var bottomNav: BottomNavigationView
     private var currentTab = R.id.nav_home
 
@@ -89,6 +90,7 @@ class MainActivity : AppCompatActivity() {
         // Une erreur dans la section caméra ne doit jamais empêcher l'appli
         // (et sa mise à jour automatique) de démarrer.
         camera = try { CameraPanel(this, viewCamera, ui) } catch (e: Exception) { null }
+        screen = try { ScreenPanel(this, viewCamera, ui) } catch (e: Exception) { null }
         findViewById<View>(R.id.homeCamera).setOnClickListener {
             bottomNav.selectedItemId = R.id.nav_camera
         }
@@ -448,5 +450,6 @@ class MainActivity : AppCompatActivity() {
         super.onDestroy()
         RootRunner.stop()
         camera?.stop()
+        screen?.stop()
     }
 }
