@@ -75,3 +75,24 @@ jobs:
           -R "${{ github.repository }}"
           -t "v${{ github.run_number }}"
           -n "Build automatique — ${{ github.sha }}"
+
+  # Client PC du partage d'écran USB : compilé sous Windows (Rust + MSVC
+  # préinstallés sur windows-latest) et attaché à la même Release.
+  # Job séparé : s'il échoue, l'APK est déjà publié.
+  screenview-windows:
+    needs: build
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build screenview.exe
+        run: cargo build --release --manifest-path camera/pc-client/screenview/Cargo.toml
+
+      - name: Attach to Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >
+          gh release upload "v${{ github.run_number }}"
+          camera/pc-client/screenview/target/release/screenview.exe
+          -R "${{ github.repository }}"
