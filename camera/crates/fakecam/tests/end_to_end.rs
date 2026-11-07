@@ -34,7 +34,7 @@ fn handshake_and_device_info() {
     let info = cam.info.as_ref().unwrap();
     assert_eq!(info.manufacturer, "Nikon Corporation");
     assert!(cam.supports(OC_NIKON_GET_LIVEVIEW_IMG));
-    assert!(!cam.supports(OC_DELETE_OBJECT));
+    assert!(!cam.supports(OC_INITIATE_CAPTURE));
     // La sonde de vie envoyée par le simulateur doit être acquittée.
     for _ in 0..50 {
         if h.probe_answered.load(Ordering::SeqCst) {
@@ -51,8 +51,8 @@ fn properties_read_and_write() {
     let (mut cam, _h) = camera();
     let d = cam.prop_desc(DPC_FOCAL_LENGTH).unwrap();
     assert!(d.writable);
-    cam.set_prop(DPC_FOCAL_LENGTH, &Value::U32(2400)).unwrap();
-    assert_eq!(cam.prop_value(DPC_FOCAL_LENGTH, d.dtype).unwrap(), Value::U32(2400));
+    cam.set_prop(DPC_FOCAL_LENGTH, &Value::U32(6100)).unwrap();
+    assert_eq!(cam.prop_value(DPC_FOCAL_LENGTH, d.dtype).unwrap(), Value::U32(6100));
     // Hors plage : refus de l'appareil, remonté comme erreur PTP.
     let e = cam.set_prop(DPC_FOCAL_LENGTH, &Value::U32(99_999)).unwrap_err();
     assert_eq!(e.response_code(), Some(RC_INVALID_DEVICE_PROP_VALUE));
@@ -90,6 +90,14 @@ fn capture_then_download() {
     cam.get_object(h, &mut data).unwrap();
     assert_eq!(data.len() as u32, info.size);
     assert_eq!(cam.get_thumb(h).unwrap(), data);
+}
+
+#[test]
+fn delete_photo() {
+    let (mut cam, _h) = camera();
+    cam.delete_object(1).unwrap();
+    assert_eq!(cam.object_handles().unwrap(), vec![2]);
+    assert_eq!(cam.delete_object(1).unwrap_err().response_code(), Some(RC_INVALID_OBJECT_HANDLE));
 }
 
 #[test]
