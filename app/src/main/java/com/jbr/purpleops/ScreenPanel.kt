@@ -35,6 +35,7 @@ class ScreenPanel(
     private val pairBtn: TextView = root.findViewById(R.id.scrPair)
     private val forgetBtn: TextView = root.findViewById(R.id.scrForget)
     private val auto: CheckBox = root.findViewById(R.id.scrAuto)
+    private val dim: CheckBox = root.findViewById(R.id.scrDim)
     private val pcs: TextView = root.findViewById(R.id.scrPcs)
     private val log: TextView = root.findViewById(R.id.scrLog)
     private val logScroll: ScrollView = root.findViewById(R.id.scrLogScroll)
@@ -59,6 +60,13 @@ class ScreenPanel(
     init {
         auto.isChecked = prefs.getBoolean("screen_auto", false)
         auto.setOnCheckedChangeListener { _, on -> prefs.edit().putBoolean("screen_auto", on).apply() }
+        dim.isChecked = prefs.getBoolean("screen_dim", false)
+        dim.setOnCheckedChangeListener { _, on ->
+            prefs.edit().putBoolean("screen_dim", on).apply()
+            if (running) {
+                Toast.makeText(act, "Pris en compte au prochain démarrage du service (ARRÊTER puis ACTIVER)", Toast.LENGTH_LONG).show()
+            }
+        }
         toggle.setOnClickListener { if (running) stop() else start() }
         pairBtn.setOnClickListener { pair() }
         forgetBtn.setOnClickListener { forget() }
@@ -101,7 +109,8 @@ class ScreenPanel(
         status.text = "Démarrage…"
         scope.launch(Dispatchers.IO) {
             try {
-                val p = ProcessBuilder("su", "-c", "exec '$bin' serve --usb 2>&1")
+                val opts = if (dim.isChecked) " --dim" else ""
+                val p = ProcessBuilder("su", "-c", "exec '$bin' serve --usb$opts 2>&1")
                     .redirectErrorStream(true).start()
                 proc = p
                 p.inputStream.bufferedReader().forEachLine { line ->

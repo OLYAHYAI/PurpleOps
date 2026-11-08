@@ -41,6 +41,11 @@
         android:textColor="@color/text" android:textSize="13sp" android:buttonTint="@color/neon"
         android:paddingBottom="6dp" />
 
+    <CheckBox android:id="@+id/scrDim" android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:text="Éteindre l'écran du téléphone pendant le pilotage (économise la batterie)"
+        android:textColor="@color/text" android:textSize="13sp" android:buttonTint="@color/neon"
+        android:paddingBottom="6dp" />
+
     <TextView android:id="@+id/scrPcs" android:layout_width="match_parent" android:layout_height="wrap_content"
         android:text="PC appairés : —" android:textColor="@color/muted" android:textSize="12sp" android:paddingBottom="8dp" />
 
