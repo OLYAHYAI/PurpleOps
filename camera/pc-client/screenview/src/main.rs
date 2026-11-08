@@ -11,7 +11,10 @@
 //!           Échap = Retour
 //! Presse-papiers synchronisé dans les deux sens (texte).
 //!
-//! Options : [HOTE] [PORT] [--mbps N] · journal : %APPDATA%\PurpleOps\screenview.log
+//! Fenêtre redimensionnable (proportions conservées) ; image réduite par moyenne
+//! des pixels (texte net), décodée en pleine résolution.
+//!
+//! Options : [HOTE] [PORT] [--mbps N, défaut 16] · journal : %APPDATA%\PurpleOps\screenview.log
 //! Protocole « PPSCR3 » : voir crates/screenctl/src/main.rs.
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
@@ -48,11 +51,11 @@ fn main() {
 }
 
 fn real_main() -> io::Result<()> {
-    let (mut host, mut port, mut mbps) = (None, 8099u16, 8u32);
+    let (mut host, mut port, mut mbps) = (None, 8099u16, 16u32);
     let mut args = std::env::args().skip(1);
     while let Some(a) = args.next() {
         if a == "--mbps" {
-            mbps = args.next().and_then(|v| v.parse().ok()).unwrap_or(8);
+            mbps = args.next().and_then(|v| v.parse().ok()).unwrap_or(16);
         } else if let Ok(p) = a.parse::<u16>() {
             port = p;
         } else if a.len() != 32 {
@@ -161,27 +164,94 @@ fn connect(host: &str, port: u16, key: &str, name: &str) -> io::Result<Option<Tc
     Ok((st[0] == 0).then_some(s))
 }
 
-/// Image prête à afficher, déjà à la taille de la fenêtre (0x00RRGGBB).
-type Shown = Arc<Mutex<Option<Vec<u32>>>>;
+/// Dernière image décodée, en pleine résolution (RGB 8 bits).
+struct Frame {
+    w: usize,
+    h: usize,
+    rgb: Vec<u8>,
+}
+type Shown = Arc<Mutex<Option<Frame>>>;
 
-#[derive(Clone, Copy)]
-struct Geo {
+/// Placement de l'image dans la fenêtre (proportions conservées, bandes noires).
+#[derive(Clone, Copy, PartialEq)]
+struct View {
     dw: usize, // écran du téléphone (coordonnées tactiles)
     dh: usize,
     ww: usize, // fenêtre
     wh: usize,
+    x0: usize, // zone d'image dans la fenêtre
+    y0: usize,
+    fw: usize,
+    fh: usize,
 }
 
-impl Geo {
-    fn new(dw: usize, dh: usize) -> Self {
+impl View {
+    /// Taille de fenêtre initiale : ~90 % de MAX_WIN_H, proportions du téléphone.
+    fn initial(dw: usize, dh: usize) -> (usize, usize) {
         let f = (dh as f32 / MAX_WIN_H as f32).max(1.0);
-        Geo { dw, dh, ww: (dw as f32 / f).round() as usize, wh: (dh as f32 / f).round() as usize }
+        ((dw as f32 / f).round() as usize, (dh as f32 / f).round() as usize)
     }
+
+    fn new(dw: usize, dh: usize, ww: usize, wh: usize) -> Self {
+        let (ww, wh) = (ww.max(1), wh.max(1));
+        let s = (ww as f32 / dw as f32).min(wh as f32 / dh as f32);
+        let fw = ((dw as f32 * s).round() as usize).clamp(1, ww);
+        let fh = ((dh as f32 * s).round() as usize).clamp(1, wh);
+        View { dw, dh, ww, wh, x0: (ww - fw) / 2, y0: (wh - fh) / 2, fw, fh }
+    }
+
     fn to_dev(self, p: (f32, f32)) -> (u32, u32) {
-        let x = (p.0 * self.dw as f32 / self.ww as f32).max(0.0) as usize;
-        let y = (p.1 * self.dh as f32 / self.wh as f32).max(0.0) as usize;
+        let x = ((p.0 - self.x0 as f32) * self.dw as f32 / self.fw as f32).max(0.0) as usize;
+        let y = ((p.1 - self.y0 as f32) * self.dh as f32 / self.fh as f32).max(0.0) as usize;
         (x.min(self.dw - 1) as u32, y.min(self.dh - 1) as u32)
     }
+
+    /// Réduction par moyenne des pixels (filtre « boîte ») : chaque pixel de la
+    /// fenêtre est la moyenne du bloc d'image qu'il couvre. Le texte reste net au
+    /// lieu d'être dentelé (un pixel sur 2,5 gardé auparavant). Calcul réparti sur
+    /// les cœurs du processeur, par bandes de lignes.
+    fn render(self, f: &Frame, out: &mut Vec<u32>) {
+        out.clear();
+        out.resize(self.ww * self.wh, 0);
+        let cols: Vec<(usize, usize)> = (0..self.fw).map(|x| span(x, self.fw, f.w)).collect();
+        let threads = thread::available_parallelism().map(|n| n.get()).unwrap_or(4).clamp(1, 8);
+        let rows_per = self.fh.div_ceil(threads);
+        let region = &mut out[self.y0 * self.ww..(self.y0 + self.fh) * self.ww];
+        thread::scope(|sc| {
+            for (band, chunk) in region.chunks_mut(rows_per * self.ww).enumerate() {
+                let cols = &cols;
+                sc.spawn(move || {
+                    let mut acc = vec![[0u32; 3]; self.fw];
+                    for (r, line) in chunk.chunks_mut(self.ww).enumerate() {
+                        let oy = band * rows_per + r;
+                        let (y0, y1) = span(oy, self.fh, f.h);
+                        acc.iter_mut().for_each(|a| *a = [0; 3]);
+                        for sy in y0..y1 {
+                            let row = &f.rgb[sy * f.w * 3..(sy + 1) * f.w * 3];
+                            for (a, &(x0, x1)) in acc.iter_mut().zip(cols) {
+                                for px in row[x0 * 3..x1 * 3].chunks_exact(3) {
+                                    a[0] += px[0] as u32;
+                                    a[1] += px[1] as u32;
+                                    a[2] += px[2] as u32;
+                                }
+                            }
+                        }
+                        let line = &mut line[self.x0..self.x0 + self.fw];
+                        for ((dst, a), &(x0, x1)) in line.iter_mut().zip(&acc).zip(cols) {
+                            let n = ((y1 - y0) * (x1 - x0)) as u32;
+                            *dst = ((a[0] / n) << 16) | ((a[1] / n) << 8) | (a[2] / n);
+                        }
+                    }
+                });
+            }
+        });
+    }
+}
+
+/// Plage de pixels source [a, b) couverte par le pixel de sortie i (au moins un).
+fn span(i: usize, n: usize, src: usize) -> (usize, usize) {
+    let a = i * src / n;
+    (a, ((i + 1) * src / n).max(a + 1).min(src))
 }
 
 /// Événements envoyés au téléphone (sans réponse).
@@ -245,7 +315,7 @@ fn session(mut s: TcpStream, mbps: u32) -> io::Result<bool> {
         return Err(err("taille d'écran invalide"));
     }
     s.set_read_timeout(None)?;
-    let geo = Geo::new(dw, dh);
+    let (iw, ih) = View::initial(dw, dh);
 
     let shown: Shown = Arc::new(Mutex::new(None));
     let stats = Arc::new(Mutex::new(String::new()));
@@ -254,7 +324,7 @@ fn session(mut s: TcpStream, mbps: u32) -> io::Result<bool> {
     {
         let (r, sh, st, al) = (s.try_clone()?, shown.clone(), stats.clone(), alive.clone());
         thread::spawn(move || {
-            if let Err(e) = recv_loop(r, geo, sh, st, clip_tx) {
+            if let Err(e) = recv_loop(r, sh, st, clip_tx) {
                 log(&format!("flux interrompu : {e}"));
             }
             *al.lock().unwrap() = false;
@@ -272,12 +342,14 @@ fn session(mut s: TcpStream, mbps: u32) -> io::Result<bool> {
         });
     }
 
-    let mut win = Window::new("PurpleOps — écran USB", geo.ww, geo.wh, WindowOptions::default())
-        .map_err(|e| err(&format!("fenêtre : {e}")))?;
+    let opts = WindowOptions { resize: true, ..WindowOptions::default() };
+    let mut win = Window::new("PurpleOps — écran USB", iw, ih, opts).map_err(|e| err(&format!("fenêtre : {e}")))?;
     win.limit_update_rate(Some(Duration::from_millis(6)));
     let (ch_tx, ch_rx) = mpsc::channel::<char>();
     win.set_input_callback(Box::new(Chars(ch_tx)));
-    let mut buf = vec![0u32; geo.ww * geo.wh];
+    let mut view = View::new(dw, dh, iw, ih);
+    let mut buf = vec![0u32; iw * ih];
+    let mut last: Option<Frame> = None;
 
     let mut clip = ClipSync::new();
     let mut finger: Option<(u32, u32)> = None;
@@ -298,7 +370,7 @@ fn session(mut s: TcpStream, mbps: u32) -> io::Result<bool> {
         }
 
         // Doigt virtuel = bouton gauche : appui, déplacements, relâchement.
-        let pos = win.get_mouse_pos(MouseMode::Clamp).map(|p| geo.to_dev(p));
+        let pos = win.get_mouse_pos(MouseMode::Clamp).map(|p| view.to_dev(p));
         let left = win.get_mouse_down(MouseButton::Left);
         match (left, finger, pos) {
             (true, None, Some(p)) => {
@@ -317,7 +389,7 @@ fn session(mut s: TcpStream, mbps: u32) -> io::Result<bool> {
         }
         if let (Some((_, dy)), Some(p)) = (win.get_scroll_wheel(), pos) {
             if dy != 0.0 && finger.is_none() {
-                let px = (dy.signum() * (geo.dh as f32 / 8.0)) as i32;
+                let px = (dy.signum() * (dh as f32 / 8.0)) as i32;
                 let _ = ev_tx.send(Ev::Scroll(p.0, p.1, px));
             }
         }
@@ -352,15 +424,31 @@ fn session(mut s: TcpStream, mbps: u32) -> io::Result<bool> {
             let _ = ev_tx.send(Ev::Text(typed));
         }
 
-        if let Some(f) = shown.lock().unwrap().take() {
-            buf = f;
+        // Nouvelle image ou fenêtre redimensionnée : on recalcule l'affichage.
+        let (ww, wh) = win.get_size();
+        let resized = (ww, wh) != (view.ww, view.wh);
+        if resized {
+            view = View::new(dw, dh, ww, wh);
+        }
+        let fresh = shown.lock().unwrap().take();
+        let got = fresh.is_some();
+        if got {
+            last = fresh;
+        }
+        if resized || got {
+            if let Some(f) = last.as_ref() {
+                view.render(f, &mut buf);
+            }
         }
         let st = stats.lock().unwrap().clone();
         if st != title && !st.is_empty() {
             win.set_title(&format!("PurpleOps — {st}"));
             title = st;
         }
-        win.update_with_buffer(&buf, geo.ww, geo.wh).map_err(|e| err(&format!("maj fenêtre : {e}")))?;
+        if buf.len() != view.ww * view.wh {
+            buf.resize(view.ww * view.wh, 0);
+        }
+        win.update_with_buffer(&buf, view.ww, view.wh).map_err(|e| err(&format!("maj fenêtre : {e}")))?;
     }
     let _ = s.shutdown(std::net::Shutdown::Both);
     Ok(true)
@@ -368,9 +456,8 @@ fn session(mut s: TcpStream, mbps: u32) -> io::Result<bool> {
 
 /// Messages du téléphone : u8 type + u32 taille + contenu.
 /// 1 = image H.264 complète (décodée, réduite, publiée) ; 2 = presse-papiers.
-fn recv_loop(mut s: TcpStream, geo: Geo, shown: Shown, stats: Arc<Mutex<String>>, clip: Sender<String>) -> io::Result<()> {
+fn recv_loop(mut s: TcpStream, shown: Shown, stats: Arc<Mutex<String>>, clip: Sender<String>) -> io::Result<()> {
     let mut dec = Decoder::new().map_err(|e| err(&format!("décodeur H.264 : {e}")))?;
-    let mut rgb: Vec<u8> = Vec::new();
     let mut msg: Vec<u8> = Vec::new();
     let (mut frames, mut errors, mut bytes, mut dec_time) = (0u32, 0u32, 0usize, Duration::ZERO);
     let mut since = Instant::now();
@@ -391,17 +478,11 @@ fn recv_loop(mut s: TcpStream, geo: Geo, shown: Shown, stats: Arc<Mutex<String>>
                 match dec.decode(&msg) {
                     Ok(Some(yuv)) => {
                         let (w, h) = yuv.dimensions();
+                        // Tampon recyclé : on reprend celui de l'image que l'affichage n'a pas prise.
+                        let mut rgb = shown.lock().unwrap().take().map(|f| f.rgb).unwrap_or_default();
                         rgb.resize(w * h * 3, 0);
                         yuv.write_rgb8(&mut rgb);
-                        let mut out = vec![0u32; geo.ww * geo.wh];
-                        for wy in 0..geo.wh {
-                            let row = (wy * h / geo.wh) * w * 3;
-                            for wx in 0..geo.ww {
-                                let i = row + (wx * w / geo.ww) * 3;
-                                out[wy * geo.ww + wx] = (rgb[i] as u32) << 16 | (rgb[i + 1] as u32) << 8 | rgb[i + 2] as u32;
-                            }
-                        }
-                        *shown.lock().unwrap() = Some(out);
+                        *shown.lock().unwrap() = Some(Frame { w, h, rgb });
                         frames += 1;
                     }
                     Ok(None) => {}
@@ -610,7 +691,12 @@ fn app_dir() -> PathBuf {
 /// Journal simple (la fenêtre n'a pas de console).
 fn log(msg: &str) {
     let _ = std::fs::create_dir_all(app_dir());
-    if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(app_dir().join("screenview.log")) {
+    let path = app_dir().join("screenview.log");
+    let new = !path.exists();
+    if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(&path) {
+        if new {
+            let _ = f.write_all(b"\xEF\xBB\xBF"); // BOM : PowerShell 5 lit alors l'UTF-8 correctement
+        }
         let t = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
         let _ = writeln!(f, "{t} {msg}");
     }
@@ -677,21 +763,60 @@ fn find_phone() -> Option<String> {
 
 /// Le partage de connexion d'Android donne aussi au PC une route Internet par le
 /// téléphone ; la carte USB (426 Mbit/s) passe alors devant le Wi-Fi. On la met en
-/// dernière priorité (métrique 5000) : une confirmation administrateur, une fois.
+/// dernière priorité (métrique 5000) : une confirmation administrateur, une fois
+/// (Windows retient le réglage pour cette carte), puis vérification.
 fn fix_route_priority() {
-    let metric = powershell(&format!(
-        "(Get-NetAdapter | {NCM_FILTER} | Get-NetIPInterface -AddressFamily IPv4 | Select-Object -First 1).InterfaceMetric"
-    ));
-    let m: u32 = metric.as_deref().and_then(|s| s.parse().ok()).unwrap_or(0);
+    let metric = || -> u32 {
+        powershell(&format!(
+            "(Get-NetAdapter | {NCM_FILTER} | Get-NetIPInterface -AddressFamily IPv4 | Select-Object -First 1).InterfaceMetric"
+        ))
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(0)
+    };
+    let m = metric();
     if m >= 1000 {
         return;
     }
-    log(&format!("carte USB du téléphone prioritaire (métrique {m}) : correction demandée"));
+    log(&format!("carte USB du téléphone prioritaire (métrique {m}) : élévation demandée"));
     let inner = format!("Get-NetAdapter | {NCM_FILTER} | Set-NetIPInterface -InterfaceMetric 5000");
-    let encoded = b64_utf16(&inner);
-    let _ = powershell(&format!(
-        "Start-Process powershell -Verb RunAs -WindowStyle Hidden -ArgumentList '-NoProfile','-EncodedCommand','{encoded}'"
-    ));
+    if !run_elevated("powershell.exe", &format!("-NoProfile -WindowStyle Hidden -EncodedCommand {}", b64_utf16(&inner))) {
+        log("élévation refusée ou impossible : la carte du téléphone reste prioritaire");
+        return;
+    }
+    for _ in 0..15 {
+        thread::sleep(Duration::from_secs(2));
+        let m = metric();
+        if m >= 1000 {
+            log(&format!("priorité réseau corrigée (métrique {m}) : Internet passe par le Wi-Fi"));
+            return;
+        }
+    }
+    log("priorité réseau : réglage non constaté après 30 s");
+}
+
+/// Lance un programme en administrateur (fenêtre de confirmation Windows).
+#[cfg(windows)]
+fn run_elevated(file: &str, params: &str) -> bool {
+    #[link(name = "shell32")]
+    extern "system" {
+        fn ShellExecuteW(
+            hwnd: *mut std::ffi::c_void,
+            op: *const u16,
+            file: *const u16,
+            params: *const u16,
+            dir: *const u16,
+            show: i32,
+        ) -> isize;
+    }
+    let w = |s: &str| s.encode_utf16().chain(std::iter::once(0)).collect::<Vec<u16>>();
+    let (op, f, p) = (w("runas"), w(file), w(params));
+    // SW_HIDE = 0 ; > 32 = succès (sinon : refus de l'utilisateur, erreur…)
+    unsafe { ShellExecuteW(std::ptr::null_mut(), op.as_ptr(), f.as_ptr(), p.as_ptr(), std::ptr::null(), 0) > 32 }
+}
+
+#[cfg(not(windows))]
+fn run_elevated(_file: &str, _params: &str) -> bool {
+    false
 }
 
 /// Base64 d'un texte en UTF-16LE (format de -EncodedCommand).
@@ -740,11 +865,38 @@ mod tests {
     use super::*;
 
     #[test]
-    fn geo_maps_corners() {
-        let g = Geo::new(1080, 2400);
-        assert_eq!(g.wh, MAX_WIN_H);
-        assert_eq!(g.to_dev((0.0, 0.0)), (0, 0));
-        assert_eq!(g.to_dev((g.ww as f32, g.wh as f32)), (1079, 2399));
+    fn view_letterbox_and_mapping() {
+        let (iw, ih) = View::initial(1080, 2400);
+        assert_eq!(ih, MAX_WIN_H);
+        let v = View::new(1080, 2400, iw, ih);
+        assert_eq!((v.x0, v.y0), (0, 0));
+        assert_eq!(v.to_dev((0.0, 0.0)), (0, 0));
+        assert_eq!(v.to_dev((v.ww as f32, v.wh as f32)), (1079, 2399));
+        // Fenêtre élargie : bandes noires à gauche/droite, mapping décalé.
+        let v = View::new(1080, 2400, 1000, 960);
+        assert_eq!((v.fw, v.fh), (432, 960));
+        assert_eq!(v.x0, 284);
+        assert_eq!(v.to_dev((284.0, 480.0)), (0, 1200));
+    }
+
+    #[test]
+    fn box_filter_averages() {
+        // 4x2 : blanc | noir en colonnes de 2 -> réduit en 2x1 : blanc, noir.
+        let mut rgb = vec![0u8; 4 * 2 * 3];
+        for y in 0..2 {
+            for x in 0..2 {
+                rgb[(y * 4 + x) * 3..][..3].copy_from_slice(&[255, 255, 255]);
+            }
+        }
+        let f = Frame { w: 4, h: 2, rgb };
+        let v = View { dw: 4, dh: 2, ww: 2, wh: 1, x0: 0, y0: 0, fw: 2, fh: 1 };
+        let mut out = Vec::new();
+        v.render(&f, &mut out);
+        assert_eq!(out, vec![0xFFFFFF, 0x000000]);
+        // 4x2 -> 1x1 : moyenne exacte (moitié blanc) = gris 127.
+        let v = View { dw: 4, dh: 2, ww: 1, wh: 1, x0: 0, y0: 0, fw: 1, fh: 1 };
+        v.render(&f, &mut out);
+        assert_eq!(out, vec![0x7F7F7F]);
     }
 
     #[test]
@@ -759,5 +911,26 @@ mod tests {
     fn encoded_command() {
         // "a" en UTF-16LE = 61 00 -> "YQA="
         assert_eq!(b64_utf16("a"), "YQA=");
+    }
+}
+
+#[cfg(test)]
+mod perf {
+    use super::*;
+
+    /// cargo test --release -- --ignored --nocapture render_cost
+    #[test]
+    #[ignore]
+    fn render_cost() {
+        let f = Frame { w: 1080, h: 2400, rgb: (0..1080 * 2400 * 3).map(|i| (i * 7 % 251) as u8).collect() };
+        for (ww, wh) in [(432, 960), (1080, 1400)] {
+            let v = View::new(1080, 2400, ww, wh);
+            let mut out = Vec::new();
+            let t = Instant::now();
+            for _ in 0..50 {
+                v.render(&f, &mut out);
+            }
+            println!("fenêtre {ww}x{wh} : {:.2} ms par image", t.elapsed().as_secs_f64() * 1000.0 / 50.0);
+        }
     }
 }
