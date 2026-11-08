@@ -796,11 +796,22 @@ fn fix_route_priority() {
     // Laisse le temps à la tâche (si elle est installée) d'agir sur une carte qui vient d'apparaître.
     thread::sleep(Duration::from_secs(10));
     let m = metric();
-    if m >= 1000 {
+    let task = powershell(&format!(
+        "if (Get-ScheduledTask -TaskName '{TASK_NAME}' -ErrorAction SilentlyContinue) {{ 'oui' }} else {{ 'non' }}"
+    ));
+    // Tâche absente = rien ne réappliquera le réglage après un redémarrage, même si
+    // la métrique est bonne maintenant (réglée à la main) : on l'installe quand même.
+    if m >= 1000 && task.as_deref() != Some("non") {
         return;
     }
-    log(&format!("carte USB du téléphone prioritaire (métrique {m}) : installation de la tâche planifiée"));
-    let set = b64_utf16(&format!("Get-NetAdapter | {NCM_FILTER} | Set-NetIPInterface -InterfaceMetric 5000"));
+    log(&format!("métrique {m}, tâche planifiée : {} — installation", task.as_deref().unwrap_or("?")));
+    // ActiveStore (immédiat) ET PersistentStore (survit au redémarrage) : seul le
+    // premier était modifié, d'où le retour de la carte du téléphone au démarrage.
+    let set = b64_utf16(&format!(
+        "Get-NetAdapter | {NCM_FILTER} | ForEach-Object {{ \
+         Set-NetIPInterface -InterfaceIndex $_.ifIndex -InterfaceMetric 5000; \
+         Set-NetIPInterface -InterfaceAlias $_.Name -PolicyStore PersistentStore -InterfaceMetric 5000 -ErrorAction SilentlyContinue }}"
+    ));
     let install = format!(
         r#"$ErrorActionPreference = 'Stop'
 $a = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument '-NoProfile -WindowStyle Hidden -EncodedCommand {set}'
