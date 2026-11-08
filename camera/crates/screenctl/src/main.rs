@@ -112,6 +112,15 @@ fn serve(args: &[String], dir: PathBuf) -> io::Result<()> {
     let ctx = Ctx { dir, log, dim };
     ctx.log(&format!("start iface={} usb={usb}", iface.as_deref().unwrap_or("-")));
     leave_app_cgroup();
+    // Un seul service : le plus récent gagne. Comme le service survit à la
+    // fermeture de l'appli, une mise à jour laissait l'ancienne version tourner ;
+    // elle gardait le port 8099 et la nouvelle ne pouvait pas écouter (le PC
+    // parlait toujours à l'ancienne).
+    let older = kill_other_instances();
+    if older > 0 {
+        ctx.log(&format!("{older} ancienne(s) instance(s) du service arrêtée(s)"));
+        thread::sleep(Duration::from_millis(500)); // libération du port
+    }
     let stale = kill_stale_screenrecord();
     if stale > 0 {
         ctx.log(&format!("{stale} screenrecord orphelin(s) d'un service précédent arrêté(s)"));
@@ -782,6 +791,31 @@ fn kill_stale_screenrecord() -> usize {
             continue;
         }
         if Command::new("kill").arg(&name).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).status().is_ok_and(|s| s.success()) {
+            n += 1;
+        }
+    }
+    n
+}
+
+/// Arrête les autres processus `screenctl serve` (anciennes versions restées en
+/// marche après une mise à jour de l'appli). Reconnaissance par /proc : nom du
+/// programme (libscreenctl.so / screenctl) + argument « serve ».
+fn kill_other_instances() -> usize {
+    let me = std::process::id().to_string();
+    let mut n = 0;
+    let Ok(rd) = fs::read_dir("/proc") else { return 0 };
+    for e in rd.filter_map(Result::ok) {
+        let pid = e.file_name().to_string_lossy().into_owned();
+        if pid == me || !pid.bytes().all(|b| b.is_ascii_digit()) {
+            continue;
+        }
+        let cmd = fs::read(e.path().join("cmdline")).unwrap_or_default();
+        let args: Vec<String> = cmd.split(|b| *b == 0).map(|a| String::from_utf8_lossy(a).into_owned()).collect();
+        let prog = args.first().map(|a| a.rsplit('/').next().unwrap_or("").to_string()).unwrap_or_default();
+        let is_service = (prog == "libscreenctl.so" || prog == "screenctl") && args.get(1).is_some_and(|a| a == "serve");
+        if is_service
+            && Command::new("kill").arg(&pid).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).status().is_ok_and(|s| s.success())
+        {
             n += 1;
         }
     }
