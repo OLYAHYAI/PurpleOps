@@ -51,7 +51,8 @@ Commandes : `screenctl serve --usb` · `pair [s]` · `forget` · `usb-off`.
 | Version | Cadence | Latence / remarques |
 | --- | --- | --- |
 | Incr. 1 : image brute `screencap` | 2,4 img/s | ~390 ms (10,4 Mo/image) |
-| Incr. 2 : H.264 | jusqu'à **60 img/s**, 3–10 Mbit/s | décodage PC ~11 ms ; pics dus à la délimitation par silence (corrigé) et aux gestes `input` (remplacés par uinput) |
+| Incr. 2 : H.264 8 Mbit/s | jusqu'à **60 img/s**, 3–10 Mbit/s | décodage PC ~11 ms ; pics dus à la délimitation par silence (corrigé) et aux gestes `input` (remplacés par uinput) |
+| H.264 16 Mbit/s + réduction par moyenne | à mesurer | réduction 1080x2400 → 432x960 : 4 ms/image sur 2 cœurs (parallélisée) ; avant, 1 pixel sur 2,5 gardé = texte dentelé |
 
 `screenrecord` n'envoie une image que si l'écran change : écran immobile = 0 img/s.
 

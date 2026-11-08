@@ -41,7 +41,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 const PROTO: &str = "PPSCR3";
 const DEFAULT_PORT: u16 = 8099;
 const DEFAULT_DIR: &str = "/data/local/soc";
-const DEFAULT_BITRATE: u32 = 8_000_000;
+const DEFAULT_BITRATE: u32 = 16_000_000;
 
 const HELP: &str = "\
 screenctl — écran Android piloté depuis le PC par le câble USB (root, PurpleOps)
