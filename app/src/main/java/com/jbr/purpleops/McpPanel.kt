@@ -31,6 +31,7 @@ class McpPanel(
     private val status: TextView = root.findViewById(R.id.mcpStatus)
     private val toggle: TextView = root.findViewById(R.id.mcpToggle)
     private val auto: CheckBox = root.findViewById(R.id.mcpAuto)
+    private val updateBtn: TextView = root.findViewById(R.id.mcpUpdate)
     private val prefs = act.getSharedPreferences("purpleops", Context.MODE_PRIVATE)
 
     // Crochets : le motif ne correspond pas à la ligne de commande de pgrep/pkill
@@ -46,6 +47,7 @@ class McpPanel(
         auto.isChecked = prefs.getBoolean("mcp_auto", true)
         auto.setOnCheckedChangeListener { _, on -> prefs.edit().putBoolean("mcp_auto", on).apply() }
         toggle.setOnClickListener { if (running) stop() else start() }
+        updateBtn.setOnClickListener { update() }
         scope.launch {
             refresh()
             if (!running && auto.isChecked) start()
@@ -90,6 +92,36 @@ class McpPanel(
                 val (_, tail) = RootRunner.runAndroidRoot("tail -n 3 $out 2>/dev/null")
                 status.text = "Échec du démarrage (chroot $name) : " + tail.trim().ifEmpty { "aucune sortie" }
             }
+        }
+    }
+
+    /**
+     * Récupère le dernier server.py depuis GitHub avec purpleops-mcp-update.sh (qui
+     * conserve config.yaml et le jeton, et vérifie la syntaxe avant de remplacer),
+     * puis redémarre le serveur. Le code du MCP vit dans le chroot : il ne suit pas
+     * les mises à jour de l'APK.
+     */
+    private fun update() {
+        scope.launch {
+            val chroot = refresh() ?: return@launch
+            val name = chroot.substringAfterLast('/')
+            status.text = "Mise à jour du serveur MCP…"
+            val raw = "https://raw.githubusercontent.com/OLYAHYAI/PurpleOps/main/mcp-server/purpleops-mcp-update.sh"
+            val (code, out) = RootRunner.runAndroidRoot(
+                "/data/local/$name-start.sh >/dev/null 2>&1; " +
+                    "env -i HOME=/root PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin " +
+                    "chroot $chroot /bin/sh -c 'curl -fsSL $raw -o /tmp/po-mcp-update.sh && sh /tmp/po-mcp-update.sh' 2>&1"
+            )
+            if (code != 0) {
+                status.text = "Échec de la mise à jour : " + out.trim().lines().takeLast(2).joinToString(" ")
+                return@launch
+            }
+            if (running) {
+                RootRunner.runAndroidRoot("pkill -f '$PATTERN'")
+                delay(800)
+                running = false
+            }
+            start()
         }
     }
 

@@ -2,9 +2,10 @@
 """
 PurpleOps MCP — serveur MCP d'assessment (Phase 4 PFE SOAR).
 
-Tourne DANS le chroot Debian du Pixel 7a. Expose à Claude Desktop, via
-Streamable HTTP sur l'IP Tailscale UNIQUEMENT, un outil d'exécution verrouillé
-dans le chroot Kali (recon/assessment), plus un outil de statut.
+Tourne DANS le chroot Kali du Pixel 7a (vérifié par l'appli : Réglages → Serveur
+MCP). Expose à Claude Desktop, via Streamable HTTP sur l'IP Tailscale UNIQUEMENT,
+un outil d'exécution verrouillé (recon/assessment), un outil de statut, et les
+outils phone_* de pilotage de l'écran du téléphone (via screenctl, voir plus bas).
 
 C'est un endpoint d'exécution (RCE par conception). Toutes les barrières de
 sécurité sont concentrées ici et sont volontairement redondantes :
@@ -15,26 +16,31 @@ sécurité sont concentrées ici et sont volontairement redondantes :
   5. Cible typée + allowlist CIDR  -> refus hors périmètre homelab/tailnet
   6. Journalisation fail-closed    -> si le log n'est pas écrit, on n'exécute pas
 
-Rien ici ne lance le serveur tout seul : il est démarré À LA DEMANDE par
-kali-mcp-start.sh pendant un exercice, puis arrêté (kill / script stop).
+Démarrage : depuis l'appli PurpleOps (Réglages → Serveur MCP, automatique à
+l'ouverture si la case est cochée), qui lance kali-mcp-start.sh dans le chroot.
 """
 from __future__ import annotations
 
+import base64
 import datetime as _dt
 import hmac
 import ipaddress
 import json
 import os
 import re
+import socket
 import subprocess
 import sys
 import threading
+import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import Any
 
 import uvicorn
 import yaml
 from fastmcp import FastMCP
+from fastmcp.exceptions import ToolError
+from fastmcp.utilities.types import Image
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import JSONResponse
@@ -238,6 +244,178 @@ def kali_status() -> dict:
         "profiles": {name: {"bin": p["bin"], "takes_target": bool(p.get("takes_target"))}
                      for name, p in PROFILES.items()},
     }
+
+
+# --------------------------------------------------------------------------
+# Pilotage de l'écran du téléphone (outils phone_*)
+# --------------------------------------------------------------------------
+# screenctl (service Android root de l'onglet Écran) ouvre une prise Unix dans ce
+# chroot SEULEMENT si l'utilisateur a coché « Autoriser le pilotage par l'IA ».
+# Pas de prise = pas de pilotage : la décision reste sur le téléphone.
+# Chaque appel est journalisé (fail-closed) ; le texte tapé n'est jamais écrit
+# en clair dans le journal, seulement sa longueur.
+PHONE_SOCK = str(CONFIG.get("phone_socket", "/opt/purpleops-mcp/screenctl.sock"))
+PHONE_OFF = ("pilotage du téléphone non autorisé : dans PurpleOps, onglet Écran, cocher "
+             "« Autoriser le pilotage par l'IA » puis ACTIVER le service")
+KEYS = {"back": 4, "home": 3, "recents": 187, "enter": 66, "delete": 67, "tab": 61,
+        "escape": 111, "up": 19, "down": 20, "left": 21, "right": 22, "menu": 82,
+        "search": 84, "volume_up": 24, "volume_down": 25, "wake": 224, "sleep": 223,
+        "notifications": 83}
+
+
+def _phone(cmd: str, timeout: float = 20.0) -> bytes:
+    if not os.path.exists(PHONE_SOCK):
+        raise ToolError(PHONE_OFF)
+    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as s:
+        s.settimeout(timeout)
+        try:
+            s.connect(PHONE_SOCK)
+        except OSError as exc:
+            raise ToolError(f"{PHONE_OFF} ({exc})") from exc
+        s.sendall((cmd + "\n").encode())
+        f = s.makefile("rb")
+        head = f.readline().decode("utf-8", "replace").strip()
+        if head.startswith("ERR"):
+            raise ToolError(head[4:] or "erreur du téléphone")
+        if not head.startswith("OK "):
+            raise ToolError(f"réponse inattendue du téléphone : {head!r}")
+        n = int(head[3:])
+        data = f.read(n)
+        if len(data) != n:
+            raise ToolError("réponse tronquée du téléphone")
+        return data
+
+
+def _phone_call(tool: str, cmd: str, audit_args: dict[str, Any], timeout: float = 20.0) -> bytes:
+    base = {"tool": tool, "caller": "claude-desktop", **audit_args}
+    _audit({**base, "phase": "request"})  # fail-closed : pas de log, pas d'action
+    try:
+        data = _phone(cmd, timeout)
+    except ToolError as exc:
+        _audit({**base, "phase": "result", "error": str(exc)})
+        raise
+    _audit({**base, "phase": "result", "ok": True, "bytes": len(data)})
+    return data
+
+
+def _screen_size() -> tuple[int, int]:
+    w, h = _phone("size").decode().split()
+    return int(w), int(h)
+
+
+@mcp.tool
+def phone_screenshot(max_height: int = 1280) -> list:
+    """Capture de l'écran du téléphone (Pixel 7a), comme une capture d'écran.
+
+    Les coordonnées attendues par phone_tap / phone_swipe sont en pixels de
+    l'ÉCRAN réel (indiqués dans le texte renvoyé), pas de l'image réduite.
+    Pour trouver où toucher, phone_read_screen est plus précis (positions exactes
+    des boutons et des textes).
+
+    Args:
+        max_height: hauteur maximale de l'image renvoyée (réduction si Pillow est
+            installé dans le chroot ; sinon PNG pleine taille).
+    """
+    png = _phone_call("phone_screenshot", "screenshot", {"max_height": max_height}, timeout=30)
+    w, h = _screen_size()
+    try:
+        import io
+        from PIL import Image as PILImage
+        im = PILImage.open(io.BytesIO(png)).convert("RGB")
+        if im.height > max_height > 0:
+            im = im.resize((round(im.width * max_height / im.height), max_height), PILImage.LANCZOS)
+        buf = io.BytesIO()
+        im.save(buf, "JPEG", quality=82)
+        img, iw, ih = Image(data=buf.getvalue(), format="jpeg"), im.width, im.height
+    except ImportError:
+        img, iw, ih = Image(data=png, format="png"), w, h
+    return [img, f"Écran du téléphone : {w}x{h} pixels. Image : {iw}x{ih}. "
+                 f"Pour toucher un point de l'image, multiplier ses coordonnées par {w / iw:.3f}."]
+
+
+@mcp.tool
+def phone_read_screen() -> str:
+    """Liste les éléments affichés sur le téléphone (textes, boutons, champs) avec
+    leur position, à la manière d'un lecteur d'écran. À utiliser avant de toucher :
+    chaque ligne donne le centre de l'élément en pixels écran, à passer à phone_tap.
+    """
+    xml = _phone_call("phone_read_screen", "ui", {}, timeout=30)
+    try:
+        root = ET.fromstring(xml)
+    except ET.ParseError as exc:
+        raise ToolError(f"arbre d'interface illisible : {exc}") from exc
+    lines: list[str] = []
+    pkg = ""
+    for n in root.iter("node"):
+        a = n.attrib
+        pkg = pkg or a.get("package", "")
+        text, desc = a.get("text", "").strip(), a.get("content-desc", "").strip()
+        clickable = a.get("clickable") == "true" or a.get("long-clickable") == "true"
+        editable = a.get("class", "").endswith("EditText")
+        if not (text or desc or clickable or editable):
+            continue
+        m = re.match(r"\[(\d+),(\d+)\]\[(\d+),(\d+)\]", a.get("bounds", ""))
+        if not m:
+            continue
+        x1, y1, x2, y2 = map(int, m.groups())
+        if x2 <= x1 or y2 <= y1:
+            continue
+        label = " · ".join(v for v in (f'"{text}"' if text else "", f"({desc})" if desc and desc != text else "") if v)
+        rid = a.get("resource-id", "").split("/")[-1]
+        kind = "champ de saisie" if editable else a.get("class", "").split(".")[-1]
+        flags = [f for f, on in (("cliquable", clickable), ("coché", a.get("checked") == "true"),
+                                 ("sélectionné", a.get("selected") == "true"),
+                                 ("désactivé", a.get("enabled") == "false")) if on]
+        lines.append(f"- {label or '(sans texte)'} — {kind}{' #' + rid if rid else ''}"
+                     f"{' [' + ', '.join(flags) + ']' if flags else ''} @ ({(x1 + x2) // 2},{(y1 + y2) // 2})")
+        if len(lines) >= 300:
+            lines.append("… (liste tronquée à 300 éléments)")
+            break
+    head = f"Appli au premier plan : {pkg or '?'} — {len(lines)} éléments (centre en pixels écran)"
+    return head + "\n" + "\n".join(lines)
+
+
+@mcp.tool
+def phone_tap(x: int, y: int) -> str:
+    """Touche l'écran du téléphone au point (x, y), en pixels écran."""
+    _phone_call("phone_tap", f"tap {int(x)} {int(y)}", {"x": x, "y": y})
+    return f"Toucher en ({x},{y})."
+
+
+@mcp.tool
+def phone_swipe(x1: int, y1: int, x2: int, y2: int, duration_ms: int = 300) -> str:
+    """Glisse le doigt de (x1, y1) à (x2, y2) (pixels écran). Pour faire défiler une
+    liste vers le bas : glisser de bas en haut (y1 > y2). Appui long : même point
+    de départ et d'arrivée avec duration_ms ≈ 800."""
+    _phone_call("phone_swipe", f"swipe {int(x1)} {int(y1)} {int(x2)} {int(y2)} {int(duration_ms)}",
+                {"from": [x1, y1], "to": [x2, y2], "ms": duration_ms})
+    return f"Glissé de ({x1},{y1}) à ({x2},{y2}) en {duration_ms} ms."
+
+
+@mcp.tool
+def phone_key(key: str) -> str:
+    """Appuie sur une touche du téléphone : back, home, recents, enter, delete, tab,
+    escape, up, down, left, right, menu, search, volume_up, volume_down, wake,
+    sleep, notifications."""
+    code = KEYS.get(key.lower().strip())
+    if code is None:
+        _audit({"tool": "phone_key", "caller": "claude-desktop", "key": key,
+                "phase": "reject", "allowed": False, "reason": "touche hors liste"})
+        raise ToolError(f"touche inconnue : {key} (possibles : {', '.join(KEYS)})")
+    _phone_call("phone_key", f"key {code}", {"key": key})
+    return f"Touche {key}."
+
+
+@mcp.tool
+def phone_type(text: str) -> str:
+    """Tape du texte dans le champ qui a le focus (toucher d'abord le champ avec
+    phone_tap). Accents et emoji acceptés. Ne valide pas : ajouter phone_key("enter")
+    si besoin."""
+    if len(text.encode()) > 4096:
+        raise ToolError("texte trop long (4096 octets max)")
+    b64 = base64.b64encode(text.encode()).decode()
+    _phone_call("phone_type", f"text {b64}", {"chars": len(text)})
+    return f"Texte tapé ({len(text)} caractères)."
 
 
 # --------------------------------------------------------------------------

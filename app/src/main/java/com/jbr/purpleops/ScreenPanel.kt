@@ -36,6 +36,7 @@ class ScreenPanel(
     private val forgetBtn: TextView = root.findViewById(R.id.scrForget)
     private val auto: CheckBox = root.findViewById(R.id.scrAuto)
     private val dim: CheckBox = root.findViewById(R.id.scrDim)
+    private val ai: CheckBox = root.findViewById(R.id.scrAi)
     private val pcs: TextView = root.findViewById(R.id.scrPcs)
     private val log: TextView = root.findViewById(R.id.scrLog)
     private val logScroll: ScrollView = root.findViewById(R.id.scrLogScroll)
@@ -60,6 +61,16 @@ class ScreenPanel(
     init {
         auto.isChecked = prefs.getBoolean("screen_auto", false)
         auto.setOnCheckedChangeListener { _, on -> prefs.edit().putBoolean("screen_auto", on).apply() }
+        // Pilotage par l'IA : décoché par défaut. Coché, screenctl ouvre une prise
+        // locale dans le dossier du serveur MCP (chroot Kali) ; décoché, aucune prise
+        // n'existe et les outils phone_* du MCP refusent.
+        ai.isChecked = prefs.getBoolean("screen_ai", false)
+        ai.setOnCheckedChangeListener { _, on ->
+            prefs.edit().putBoolean("screen_ai", on).apply()
+            if (running) {
+                Toast.makeText(act, "Pris en compte au prochain démarrage du service (ARRÊTER puis ACTIVER)", Toast.LENGTH_LONG).show()
+            }
+        }
         dim.isChecked = prefs.getBoolean("screen_dim", false)
         dim.setOnCheckedChangeListener { _, on ->
             prefs.edit().putBoolean("screen_dim", on).apply()
@@ -109,7 +120,8 @@ class ScreenPanel(
         status.text = "Démarrage…"
         scope.launch(Dispatchers.IO) {
             try {
-                val opts = if (dim.isChecked) " --dim" else ""
+                val opts = (if (dim.isChecked) " --dim" else "") +
+                    (if (ai.isChecked) " --ctl /data/local/kali/opt/purpleops-mcp/screenctl.sock" else "")
                 val p = ProcessBuilder("su", "-c", "exec '$bin' serve --usb$opts 2>&1")
                     .redirectErrorStream(true).start()
                 proc = p
