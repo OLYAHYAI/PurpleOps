@@ -18,7 +18,7 @@ use ptpip::codes::*;
 use ptpip::dataset::{self, Form, PropDesc, Value};
 use ptpip::Camera;
 
-use crate::{all_props, capture_and_find, download, hex, random_bytes, zoom_target};
+use crate::{all_props, capture_and_find, download, hex, random_bytes, zoom_info, zoom_target, zoom_to};
 
 #[derive(Default)]
 struct Frame {
@@ -251,8 +251,25 @@ fn handle(mut s: TcpStream, sh: Arc<Shared>) -> std::io::Result<()> {
             };
             respond(&mut s, "200 OK", "application/json", body.as_bytes())
         }
+        ("GET", "/api/zoominfo") => {
+            let r = if !sh.zoom_ok {
+                None
+            } else {
+                lock(&sh.cam).prop_desc(DPC_FOCAL_LENGTH).ok().and_then(|d| zoom_info(&d))
+            };
+            let body = match r {
+                Some((min, max, cur, vals)) => format!(
+                    "{{\"ok\":true,\"min\":{min},\"max\":{max},\"cur\":{cur},\"values\":[{}]}}",
+                    vals.iter().map(|v| v.to_string()).collect::<Vec<_>>().join(",")
+                ),
+                None => "{\"ok\":false}".to_string(),
+            };
+            respond(&mut s, "200 OK", "application/json", body.as_bytes())
+        }
         ("POST", "/api/zoom") => {
             let dir = if query_param(query, "dir") == Some("in") { 1 } else { -1 };
+            // ?value=N : focale visée (glissière) ; sinon un cran (?dir=in|out).
+            let want: Option<i128> = query_param(query, "value").and_then(|v| v.parse().ok());
             let r: Result<String, String> = if !sh.zoom_ok {
                 Err("zoom indisponible sur cet appareil".into())
             } else {
@@ -260,7 +277,10 @@ fn handle(mut s: TcpStream, sh: Arc<Shared>) -> std::io::Result<()> {
                 cam.prop_desc(DPC_FOCAL_LENGTH)
                     .map_err(|x| x.to_string())
                     .and_then(|d| {
-                        let v = zoom_target(&d, dir).ok_or("limite atteinte")?;
+                        let v = match want {
+                            Some(w) => zoom_to(&d, w).ok_or("focale hors plage")?,
+                            None => zoom_target(&d, dir).ok_or("limite atteinte")?,
+                        };
                         cam.set_prop(DPC_FOCAL_LENGTH, &v).map_err(|x| x.to_string())?;
                         Ok(v.to_string())
                     })
@@ -514,46 +534,89 @@ fn html_escape(s: &str) -> String {
 
 const PAGE: &str = r##"<!doctype html>
 <html lang="fr"><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>p900ctl</title>
 <style>
-:root{--bg:#f4f3ef;--fg:#1b1b19;--mute:#6b6a64;--line:#d6d4cc;--acc:#c8102e;--btn:#fff}
-@media (prefers-color-scheme:dark){:root{--bg:#121211;--fg:#ecebe6;--mute:#9a988f;--line:#2e2d2a;--acc:#ff4d5e;--btn:#1d1c1a}}
-*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.4 system-ui,sans-serif}
-header{display:flex;justify-content:space-between;align-items:baseline;padding:12px 16px}
-h1{font-size:15px;margin:0;font-weight:600}#st{color:var(--mute);font-size:13px;font-variant-numeric:tabular-nums}
-#view{background:#000;aspect-ratio:4/3;display:flex;align-items:center;justify-content:center;color:#888}
-#view img{width:100%;height:100%;object-fit:contain}
-.bar{display:grid;grid-template-columns:1fr 1.4fr 1fr;gap:12px;padding:16px}
-button{font:inherit;font-size:17px;padding:16px 0;border-radius:12px;border:1px solid var(--line);background:var(--btn);color:var(--fg)}
-button:disabled{opacity:.35}#shoot{background:var(--acc);border-color:var(--acc);color:#fff;font-weight:600}
-#msg{padding:0 16px;min-height:1.4em;color:var(--mute);font-size:13px}
-#last{display:block;max-width:40%;margin:12px 16px;border-radius:8px}
-.bar2{display:grid;grid-template-columns:1fr 1fr;gap:12px;padding:0 16px 12px}.bar2 button{font-size:15px;padding:12px 0}
-#props{padding:0 16px 16px}.row{border-top:1px solid var(--line);padding:10px 0}.row b{font-weight:600}
-.row small{color:var(--mute);margin-left:6px}.ctl{display:flex;gap:8px;margin-top:6px}
-.ctl select,.ctl input{flex:1;font:inherit;padding:8px;border-radius:8px;border:1px solid var(--line);background:var(--btn);color:var(--fg)}
-.ctl button{font-size:14px;padding:8px 14px}
+/* Interface façon appareil photo de téléphone : visée en grand sur fond noir,
+   zoom en glissière, gros déclencheur, miniature de la dernière photo. */
+:root{--fg:#fff;--mute:#9b9b9b;--chip:#ffffff1f;--acc:#ff3b4e;--sheet:#161616}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{height:100%;margin:0;background:#000;color:var(--fg);font:15px/1.35 system-ui,sans-serif;overflow:hidden}
+body{display:flex;flex-direction:column}
+#top{display:flex;justify-content:space-between;align-items:center;padding:10px 14px;font-size:13px;color:var(--mute)}
+#top b{color:var(--fg);font-weight:600}
+#gear{background:none;border:0;color:var(--fg);font-size:20px;padding:4px 8px}
+#view{position:relative;flex:1;min-height:0;display:flex;align-items:center;justify-content:center;background:#000}
+#view img{max-width:100%;max-height:100%;object-fit:contain}
+#off{position:absolute;color:var(--mute);font-size:14px}
+#ring{position:absolute;width:76px;height:76px;margin:-38px 0 0 -38px;border:2px solid #fff;border-radius:50%;opacity:0;pointer-events:none;transition:opacity .2s,transform .3s}
+#ring.on{opacity:1;transform:scale(.8)}#ring.ok{border-color:#5ce17a}#ring.ko{border-color:var(--acc)}
+#flash{position:absolute;inset:0;background:#fff;opacity:0;pointer-events:none;transition:opacity .25s}
+#toast{position:absolute;left:50%;bottom:12px;transform:translateX(-50%);background:#000b;padding:6px 12px;border-radius:14px;font-size:13px;opacity:0;transition:opacity .3s;max-width:90%;text-align:center}
+#toast.on{opacity:1}
+#zoom{padding:10px 18px 4px}
+#zl{text-align:center;font-weight:600;font-variant-numeric:tabular-nums;margin-bottom:2px}
+input[type=range]{width:100%;accent-color:#fff;height:28px}
+#chips{display:flex;justify-content:center;gap:8px;margin-top:6px}
+#chips button{background:var(--chip);color:var(--fg);border:0;border-radius:16px;padding:6px 12px;font:inherit;font-size:13px;font-variant-numeric:tabular-nums}
+#chips button.sel{background:#fff;color:#000;font-weight:600}
+#ctrl{display:grid;grid-template-columns:1fr auto 1fr;align-items:center;padding:14px 26px 22px}
+#thumb{width:56px;height:56px;border-radius:12px;background:#222 center/cover no-repeat;border:2px solid #333}
+#shoot{width:78px;height:78px;border-radius:50%;border:4px solid #fff;background:#fff;box-shadow:inset 0 0 0 4px #000;justify-self:center}
+#shoot:active{transform:scale(.94)}#shoot:disabled{background:#777}
+#af{justify-self:end;width:56px;height:56px;border-radius:50%;border:0;background:var(--chip);color:var(--fg);font:inherit;font-size:13px;font-weight:600}
+button:disabled{opacity:.35}
+.sheet{position:fixed;inset:auto 0 0 0;max-height:78%;overflow:auto;background:var(--sheet);border-radius:18px 18px 0 0;padding:14px 16px 24px;transform:translateY(105%);transition:transform .25s}
+.sheet.on{transform:none}
+.sheet h2{font-size:16px;margin:0 0 8px;display:flex;justify-content:space-between}
+.sheet h2 button{background:none;border:0;color:var(--fg);font-size:18px}
+.row{border-top:1px solid #2a2a2a;padding:10px 0}.row b{font-weight:600}.row small{color:var(--mute);margin-left:6px}
+.ctl{display:flex;gap:8px;margin-top:6px}
+.ctl select,.ctl input{flex:1;font:inherit;padding:8px;border-radius:8px;border:1px solid #333;background:#222;color:var(--fg)}
+.ctl button{font:inherit;font-size:14px;padding:8px 14px;border-radius:8px;border:0;background:#fff;color:#000}
+#big img{width:100%;border-radius:10px}#big p{color:var(--mute);font-size:13px}
 </style></head><body>
-<header><h1>__MODEL__</h1><span id="st">…</span></header>
-<div id="view"><img id="lv" alt="Visée"></div>
-<div class="bar"><button id="zout">W −</button><button id="shoot">Déclencher</button><button id="zin">T +</button></div>
-<div class="bar2"><button id="focus">Mise au point</button><button id="settings">Réglages</button></div>
-<div id="props" hidden></div>
-<p id="msg"></p><img id="last" hidden alt="Dernière photo">
+<div id="top"><b>__MODEL__</b><span id="st">…</span><button id="gear" aria-label="Réglages">⚙</button></div>
+<div id="view"><img id="lv" alt=""><span id="off">Connexion à la visée…</span><div id="ring"></div><div id="flash"></div><div id="toast"></div></div>
+<div id="zoom" hidden><div id="zl">1,0×</div><input id="zs" type="range" min="0" max="1000" value="0"><div id="chips"></div></div>
+<div id="ctrl"><button id="thumb" aria-label="Dernière photo"></button><button id="shoot" aria-label="Déclencher"></button><button id="af">AF</button></div>
+<div class="sheet" id="props"><h2>Réglages de l'appareil<button data-close>✕</button></h2><div id="pl">…</div></div>
+<div class="sheet" id="big"><h2>Dernière photo<button data-close>✕</button></h2><img id="bigimg" alt=""><p id="bigtxt"></p></div>
 <script>
 const T="__TOKEN__",q=p=>p+(p.includes("?")?"&":"?")+"t="+T,$=id=>document.getElementById(id);
-async function st(){try{const s=await (await fetch(q("/api/status"))).json();
-$("st").textContent=s.liveview?s.fps.toFixed(1)+" i/s":"visée non disponible";
-$("zin").disabled=$("zout").disabled=!s.zoom;$("focus").disabled=!s.focus;if(s.last_error)$("msg").textContent=s.last_error;
-if(s.liveview&&!$("lv").src)$("lv").src=q("/stream.mjpg");}catch(e){$("st").textContent="hors ligne"}}
-async function post(p,busy){$("msg").textContent=busy;const r=await (await fetch(q(p),{method:"POST"})).json();
-$("msg").textContent=r.ok?(r.file?"Enregistrée : "+r.file+" ("+r.ms+" ms)":"Focale : "+r.focal):r.error;return r}
-$("shoot").onclick=async()=>{$("shoot").disabled=true;const r=await post("/api/capture","Prise de vue…");
-if(r.ok){$("last").src=q("/last.jpg?"+Date.now());$("last").hidden=false}$("shoot").disabled=false;
-$("lv").src="";setTimeout(()=>{$("lv").src=q("/stream.mjpg")},300)};
-$("zin").onclick=()=>post("/api/zoom?dir=in","Zoom…");$("zout").onclick=()=>post("/api/zoom?dir=out","Zoom…");
-$("focus").onclick=async()=>{$("msg").textContent="Mise au point…";const r=await (await fetch(q("/api/focus"),{method:"POST"})).json();$("msg").textContent=r.ok?r.msg:r.error};
+let Z=null,lastFile="",tt=0;
+function toast(m){const t=$("toast");t.textContent=m;t.classList.add("on");clearTimeout(tt);tt=setTimeout(()=>t.classList.remove("on"),2500)}
+const fr=x=>x.toFixed(1).replace(".",",");
+async function api(p,post){const r=await fetch(q(p),post?{method:"POST"}:{});return r.json()}
+async function st(){try{const s=await api("/api/status");
+$("st").textContent=s.liveview?fr(s.fps)+" i/s":"visée indisponible";$("af").disabled=!s.focus;
+if(s.last_error)toast(s.last_error);
+if(s.liveview&&!$("lv").src){$("lv").src=q("/stream.mjpg")}
+if(!Z&&s.zoom)zinfo()}catch(e){$("st").textContent="hors ligne"}}
+$("lv").onload=()=>$("off").hidden=true;
+/* Zoom : glissière logarithmique (1× … 83× sur la P900), raccourcis, focale réelle. */
+const toS=f=>Math.round(1000*Math.log(f/Z.min)/Math.log(Z.max/Z.min)),toF=s=>Z.min*Math.pow(Z.max/Z.min,s/1000);
+function showZ(f){$("zl").textContent=fr(f/Z.min)+"×";document.querySelectorAll("#chips button").forEach(b=>b.classList.toggle("sel",Math.abs(+b.dataset.x-f/Z.min)<.15*+b.dataset.x))}
+async function zinfo(){const r=await api("/api/zoominfo");if(!r.ok)return;Z=r;$("zoom").hidden=false;
+const top=Z.max/Z.min,c=$("chips");c.textContent="";[1,2,5,10,25,top].filter((x,i,a)=>x<=top&&a.indexOf(x)==i).forEach(x=>{const b=document.createElement("button");
+b.dataset.x=x;b.textContent=(x==top?Math.round(x):x)+"×";b.onclick=()=>zoomTo(Z.min*x);c.appendChild(b)});$("zs").value=toS(Z.cur);showZ(Z.cur)}
+$("zs").oninput=e=>Z&&showZ(toF(+e.target.value));
+$("zs").onchange=e=>Z&&zoomTo(toF(+e.target.value));
+async function zoomTo(f){$("zs").value=toS(f);showZ(f);const r=await api("/api/zoom?value="+Math.round(f),true);
+if(r.ok){Z.cur=parseFloat(r.focal);$("zs").value=toS(Z.cur);showZ(Z.cur)}else toast(r.error)}
+/* Déclencheur : éclair blanc, vibration, miniature mise à jour. */
+$("shoot").onclick=async()=>{const b=$("shoot");b.disabled=true;$("flash").style.opacity=.8;setTimeout(()=>$("flash").style.opacity=0,120);
+if(navigator.vibrate)navigator.vibrate(30);const r=await api("/api/capture",true);
+if(r.ok){lastFile=r.file;const u=q("/last.jpg?"+Date.now());$("thumb").style.backgroundImage="url('"+u+"')";$("bigimg").src=u;toast("Enregistrée ("+r.ms+" ms)")}else toast(r.error);
+b.disabled=false;$("lv").src="";setTimeout(()=>{$("lv").src=q("/stream.mjpg")},300)};
+/* Toucher la visée = mise au point (anneau vert si réussie). */
+async function focus(x,y){const g=$("ring");g.className="";if(x!=null){g.style.left=x+"px";g.style.top=y+"px"}else{g.style.left="50%";g.style.top="50%"}
+g.classList.add("on");const r=await api("/api/focus",true);g.classList.add(r.ok?"ok":"ko");if(!r.ok)toast(r.error);setTimeout(()=>g.className="",700)}
+$("view").onclick=e=>{if($("af").disabled)return;const b=$("view").getBoundingClientRect();focus(e.clientX-b.left,e.clientY-b.top)};
+$("af").onclick=()=>focus();
+/* Panneaux du bas : dernière photo, réglages. */
+document.querySelectorAll("[data-close]").forEach(b=>b.onclick=()=>b.closest(".sheet").classList.remove("on"));
+$("thumb").onclick=()=>{if(!lastFile)return toast("Pas encore de photo dans cette session");$("bigtxt").textContent=lastFile;$("big").classList.add("on")};
 const U={20487:v=>"f/"+(v/100),20488:v=>(v/100)+" mm",20493:v=>v>=10000?(v/10000)+" s":"1/"+Math.round(10000/v)+" s",20496:v=>(v/1000)+" IL"};
 const fmt=(c,v)=>U[c]&&typeof v=="number"?v+" ("+U[c](v)+")":String(v);
 function row(p){const d=document.createElement("div");d.className="row";
@@ -562,14 +625,14 @@ const sm=document.createElement("small");sm.textContent=p.hex+" · "+fmt(p.code,
 if(p.writable&&p.form.kind!="none"){const c=document.createElement("div");c.className="ctl";let inp;
 if(p.form.kind=="enum"){inp=document.createElement("select");p.form.values.forEach(v=>{const o=document.createElement("option");o.value=v;o.textContent=fmt(p.code,v);if(v===p.current)o.selected=true;inp.appendChild(o)})}
 else{inp=document.createElement("input");inp.type="number";inp.min=p.form.min;inp.max=p.form.max;inp.step=p.form.step;inp.value=p.current}
-const go=document.createElement("button");go.textContent="Appliquer";
-go.onclick=async()=>{$("msg").textContent="Réglage…";const r=await (await fetch(q("/api/prop?code="+p.code+"&value="+encodeURIComponent(inp.value)),{method:"POST"})).json();
-if(r.ok){p.current=r.current;sm.textContent=p.hex+" · "+fmt(p.code,r.current);$("msg").textContent=(p.name||p.hex)+" = "+fmt(p.code,r.current)}else $("msg").textContent=r.error};
+const go=document.createElement("button");go.textContent="OK";
+go.onclick=async()=>{const r=await api("/api/prop?code="+p.code+"&value="+encodeURIComponent(inp.value),true);
+if(r.ok){p.current=r.current;sm.textContent=p.hex+" · "+fmt(p.code,r.current);toast((p.name||p.hex)+" = "+fmt(p.code,r.current))}else toast(r.error)};
 c.appendChild(inp);c.appendChild(go);d.appendChild(c)}return d}
-$("settings").onclick=async()=>{const box=$("props");if(!box.hidden){box.hidden=true;return}
-box.textContent="Lecture des réglages…";box.hidden=false;try{const ps=await (await fetch(q("/api/props"))).json();box.textContent="";
-const w=ps.filter(p=>p.writable),r=ps.filter(p=>!p.writable);const h=document.createElement("p");h.className="row";
-h.textContent=w.length+" réglages modifiables, "+r.length+" en lecture seule";box.appendChild(h);w.concat(r).forEach(p=>box.appendChild(row(p)))}catch(e){box.textContent="Erreur : "+e}};
+$("gear").onclick=async()=>{const s=$("props");s.classList.add("on");const box=$("pl");box.textContent="Lecture des réglages…";
+try{const ps=await api("/api/props");box.textContent="";const w=ps.filter(p=>p.writable),r=ps.filter(p=>!p.writable);
+const h=document.createElement("p");h.className="row";h.textContent=w.length+" réglages modifiables, "+r.length+" en lecture seule";box.appendChild(h);
+w.concat(r).forEach(p=>box.appendChild(row(p)))}catch(e){box.textContent="Erreur : "+e}};
 st();setInterval(st,1000);
 </script></body></html>
 "##;

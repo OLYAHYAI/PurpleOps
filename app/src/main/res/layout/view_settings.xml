@@ -43,6 +43,22 @@
         <TextView android:id="@+id/cfgStatus" android:layout_width="match_parent" android:layout_height="wrap_content"
             android:text="" android:textColor="@color/muted" android:textSize="12sp" android:fontFamily="monospace" android:paddingTop="10dp" />
 
+        <!-- Serveur MCP PurpleOps (Claude Desktop via Tailscale) -->
+        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Serveur MCP PurpleOps"
+            android:textColor="@color/neon" android:textSize="13sp" android:paddingTop="18dp" android:paddingBottom="4dp" />
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:orientation="horizontal" android:gravity="center_vertical">
+            <TextView android:id="@+id/mcpStatus" android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content"
+                android:text="—" android:textColor="@color/muted" android:textSize="12sp" />
+            <TextView android:id="@+id/mcpToggle" android:layout_width="wrap_content" android:layout_height="wrap_content"
+                android:background="@drawable/btn_neon" android:gravity="center" android:layout_marginStart="8dp"
+                android:paddingStart="16dp" android:paddingEnd="16dp" android:paddingTop="9dp" android:paddingBottom="9dp"
+                android:text="DÉMARRER" android:textColor="@color/neon" android:textSize="12sp" />
+        </LinearLayout>
+        <CheckBox android:id="@+id/mcpAuto" android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:text="Démarrer automatiquement à l'ouverture de PurpleOps" android:textColor="@color/text"
+            android:textSize="13sp" android:buttonTint="@color/neon" android:paddingBottom="10dp" />
+
         <TextView android:id="@+id/cfgVersion" android:layout_width="wrap_content" android:layout_height="wrap_content"
             android:text="" android:textColor="@color/muted" android:textSize="11sp" android:paddingTop="18dp" />
         <TextView android:id="@+id/cfgCheckUpdate" android:layout_width="wrap_content" android:layout_height="wrap_content"

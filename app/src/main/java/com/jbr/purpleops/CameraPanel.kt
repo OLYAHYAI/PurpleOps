@@ -1,6 +1,7 @@
 package com.jbr.purpleops
 
 import android.annotation.SuppressLint
+import android.graphics.Color
 import android.view.View
 import android.webkit.WebResourceRequest
 import android.webkit.WebView
@@ -24,6 +25,10 @@ import java.io.File
  *
  * Les sockets sont liées à wlan0 (--iface) : le trafic part par le Wi-Fi de
  * l'appareil photo même si les données mobiles sont actives.
+ *
+ * Mise en page : une ligne d'en-tête (état, JOURNAL, VISÉE/ARRÊTER) puis la visée
+ * sur toute la hauteur. Le journal et le relevé sont dans une vue à part, inutile
+ * pendant la prise de vue.
  */
 class CameraPanel(
     private val act: AppCompatActivity,
@@ -33,7 +38,9 @@ class CameraPanel(
     private val status: TextView = root.findViewById(R.id.camStatus)
     private val probeBtn: TextView = root.findViewById(R.id.camProbe)
     private val startBtn: TextView = root.findViewById(R.id.camStart)
-    private val stopBtn: TextView = root.findViewById(R.id.camStop)
+    private val journalBtn: TextView = root.findViewById(R.id.camJournal)
+    private val journalView: View = root.findViewById(R.id.camJournalView)
+    private val empty: TextView = root.findViewById(R.id.camEmpty)
     private val web: WebView = root.findViewById(R.id.camWeb)
     private val log: TextView = root.findViewById(R.id.camLog)
     private val logScroll: ScrollView = root.findViewById(R.id.camLogScroll)
@@ -52,14 +59,30 @@ class CameraPanel(
     init {
         setupWeb()
         probeBtn.setOnClickListener { probe() }
-        startBtn.setOnClickListener { start() }
-        stopBtn.setOnClickListener { stop(); status.text = "Arrêt demandé" }
+        startBtn.setOnClickListener {
+            if (serveProc != null) {
+                stop()
+                status.text = "Arrêt demandé"
+            } else {
+                start()
+            }
+        }
+        journalBtn.setOnClickListener { showJournal(journalView.visibility != View.VISIBLE) }
         status.text = if (File(bin).exists()) "Prêt — connectez le téléphone au Wi-Fi « Nikon… » de l'appareil"
         else "p900ctl absent de cette version de l'APK"
     }
 
+    /** Bascule entre la visée et le journal. */
+    private fun showJournal(on: Boolean) {
+        journalView.visibility = if (on) View.VISIBLE else View.GONE
+        journalBtn.text = if (on) "VISÉE ↩" else "JOURNAL"
+        val serving = web.visibility == View.VISIBLE || serveProc != null
+        empty.visibility = if (on || serving) View.GONE else View.VISIBLE
+    }
+
     @SuppressLint("SetJavaScriptEnabled")
     private fun setupWeb() {
+        web.setBackgroundColor(Color.BLACK) // fond de la page de visée : pas de flash blanc
         web.settings.javaScriptEnabled = true
         web.settings.allowFileAccess = false
         web.settings.allowContentAccess = false
@@ -88,6 +111,7 @@ class CameraPanel(
         // La P900 n'accepte qu'une connexion : on arrête la visée avant le relevé.
         val wasServing = serveProc != null
         if (wasServing) stop()
+        showJournal(true)
         status.text = "Relevé en cours…"
         scope.launch {
             if (wasServing) kotlinx.coroutines.delay(2000)
@@ -102,6 +126,7 @@ class CameraPanel(
     private fun start() {
         if (!ready() || serveProc != null) return
         status.text = "Connexion à l'appareil…"
+        startBtn.text = "ARRÊTER"
         scope.launch(Dispatchers.IO) {
             try {
                 // Une visée restée en marche (appli mise à jour ou tuée) garde le port
@@ -115,6 +140,8 @@ class CameraPanel(
                     act.runOnUiThread {
                         append(line)
                         if (url != null) {
+                            showJournal(false)
+                            empty.visibility = View.GONE
                             web.visibility = View.VISIBLE
                             web.loadUrl(url)
                             status.text = "Visée active — photos dans $outDir"
@@ -123,12 +150,17 @@ class CameraPanel(
                 }
                 val code = p.waitFor()
                 act.runOnUiThread {
-                    status.text = "Service caméra arrêté (code $code)"
+                    status.text = "Visée arrêtée (code $code)"
+                    startBtn.text = "VISÉE"
                     web.loadUrl("about:blank")
                     web.visibility = View.GONE
+                    if (journalView.visibility != View.VISIBLE) empty.visibility = View.VISIBLE
                 }
             } catch (e: Exception) {
-                act.runOnUiThread { append("[erreur] ${e.message}") }
+                act.runOnUiThread {
+                    append("[erreur] ${e.message}")
+                    startBtn.text = "VISÉE"
+                }
             } finally {
                 serveProc = null
             }
