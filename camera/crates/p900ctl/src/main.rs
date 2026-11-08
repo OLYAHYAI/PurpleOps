@@ -667,6 +667,37 @@ pub(crate) fn zoom_target(d: &PropDesc, dir: i32) -> Option<Value> {
     }
 }
 
+/// Plage de zoom (focale, en 1/100 mm) : (min, max, actuelle, valeurs permises
+/// si la propriété est une énumération, sinon vide).
+pub(crate) fn zoom_info(d: &PropDesc) -> Option<(i128, i128, i128, Vec<i128>)> {
+    let cur = d.current.as_i128()?;
+    match &d.form {
+        Form::Enum(v) => {
+            let mut n: Vec<i128> = v.iter().filter_map(|x| x.as_i128()).collect();
+            n.sort_unstable();
+            Some((*n.first()?, *n.last()?, cur, n))
+        }
+        Form::Range { min, max, .. } => Some((min.as_i128()?, max.as_i128()?, cur, Vec::new())),
+        _ => None,
+    }
+}
+
+/// Valeur permise la plus proche de la focale voulue (glissière de zoom).
+pub(crate) fn zoom_to(d: &PropDesc, want: i128) -> Option<Value> {
+    match &d.form {
+        Form::Enum(v) => {
+            let best = v.iter().filter_map(|x| x.as_i128()).min_by_key(|x| (x - want).abs())?;
+            dataset::int_like(&d.current, best)
+        }
+        Form::Range { min, max, step } => {
+            let (lo, hi, st) = (min.as_i128()?, max.as_i128()?, step.as_i128()?.max(1));
+            let t = (lo + (want.clamp(lo, hi) - lo + st / 2) / st * st).clamp(lo, hi);
+            dataset::int_like(&d.current, t)
+        }
+        _ => None,
+    }
+}
+
 fn cmd_zoom(cam: &mut Camera, args: &Args) -> Res<()> {
     let arg = args.pos.get(1).ok_or("zoom attend in, out ou une valeur")?;
     if !cam.info.as_ref().is_some_and(|i| i.properties.contains(&DPC_FOCAL_LENGTH)) {

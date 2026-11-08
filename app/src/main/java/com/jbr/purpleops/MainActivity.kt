@@ -93,6 +93,7 @@ class MainActivity : AppCompatActivity() {
         // (et sa mise à jour automatique) de démarrer.
         camera = try { CameraPanel(this, viewCamera, ui) } catch (e: Exception) { null }
         screen = try { ScreenPanel(this, viewScreen, ui) } catch (e: Exception) { null }
+        try { McpPanel(this, viewSettings, ui) } catch (e: Exception) { }
 
         bindKali()
         bindSettings()

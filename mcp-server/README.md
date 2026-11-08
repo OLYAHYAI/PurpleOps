@@ -33,6 +33,19 @@ Chaque appel écrit une ligne JSON dans `log_file` (phases `request`/`result`/`r
 Le décodeur + les règles custom côté manager suivent la **procédure de changement**
 (branche Git, backup, `wazuh-analysisd -t`, restart, non-régression) — étape ultérieure.
 
+## Démarrage depuis l'appli (sans commande)
+PurpleOps → **Réglages → Serveur MCP PurpleOps** :
+- l'appli cherche `opt/purpleops-mcp/server.py` dans `/data/local/kali` puis
+  `/data/local/debian` et **affiche le chroot où il est installé** ;
+- DÉMARRER / ARRÊTER, et **démarrage automatique à l'ouverture de l'appli**
+  (case cochée par défaut, décochable) ;
+- lancement : script de montage du chroot (`kali-start.sh` / `debian-start.sh`),
+  puis `kali-mcp-start.sh` dans le chroot, détaché (`setsid`) et sorti du cgroup
+  de l'appli (il survit à sa fermeture). Sortie : `<chroot>/var/log/purpleops-mcp.out`.
+
+Les barrières restent celles du serveur (bind Tailscale, Bearer, journal fail-closed) :
+si Tailscale est coupé, `kali-mcp-start.sh` refuse de démarrer et la raison s'affiche.
+
 ## Déploiement (dans le chroot Kali)
 - Code dans `/opt/purpleops-mcp` (= `/data/local/kali/opt/...` côté Android).
 - `kali_invoke: []` (outils locaux, aucun saut de chroot).
