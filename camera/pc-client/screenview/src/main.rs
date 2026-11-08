@@ -468,6 +468,7 @@ fn recv_loop(mut s: TcpStream, shown: Shown, stats: Arc<Mutex<String>>, clip: Se
     let mut msg: Vec<u8> = Vec::new();
     let (mut frames, mut errors, mut bytes, mut dec_time) = (0u32, 0u32, 0usize, Duration::ZERO);
     let mut since = Instant::now();
+    let mut phone_state = String::new();
     loop {
         let mut head = [0u8; 5];
         s.read_exact(&mut head)?;
@@ -500,6 +501,14 @@ fn recv_loop(mut s: TcpStream, shown: Shown, stats: Arc<Mutex<String>>, clip: Se
             2 => {
                 let _ = clip.send(String::from_utf8_lossy(&msg).into_owned());
             }
+            3 => {
+                // État envoyé par le téléphone (ex. « screenrecord échoue : … ») ; vide = résolu.
+                let t = String::from_utf8_lossy(&msg).into_owned();
+                if !t.is_empty() {
+                    log(&format!("téléphone : {t}"));
+                }
+                phone_state = t;
+            }
             _ => {} // type inconnu : ignoré (compatibilité future)
         }
 
@@ -513,6 +522,9 @@ fn recv_loop(mut s: TcpStream, shown: Shown, stats: Arc<Mutex<String>>, clip: Se
             );
             if errors > 0 {
                 line += &format!(" · {errors} erreurs");
+            }
+            if !phone_state.is_empty() {
+                line = format!("téléphone : {phone_state}");
             }
             *stats.lock().unwrap() = line;
             (frames, errors, bytes, dec_time) = (0, 0, 0, Duration::ZERO);

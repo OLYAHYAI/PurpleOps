@@ -20,6 +20,7 @@
 //!         u8 type + u32 taille + contenu
 //!           1 = image H.264 Annex-B complète (une unité d'accès)
 //!           2 = presse-papiers du téléphone (UTF-8)
+//!           3 = état du téléphone à afficher (UTF-8), ex. échec de screenrecord
 //!   C->S  événements, sans réponse :
 //!         0x10 DOWN x y | 0x11 MOVE x y | 0x12 UP
 //!         0x20 KEY code(Linux) mods(bit0 Maj, bit1 Ctrl, bit2 Alt)
@@ -111,6 +112,10 @@ fn serve(args: &[String], dir: PathBuf) -> io::Result<()> {
     let ctx = Ctx { dir, log, dim };
     ctx.log(&format!("start iface={} usb={usb}", iface.as_deref().unwrap_or("-")));
     leave_app_cgroup();
+    let stale = kill_stale_screenrecord();
+    if stale > 0 {
+        ctx.log(&format!("{stale} screenrecord orphelin(s) d'un service précédent arrêté(s)"));
+    }
     if let Some(p) = opt(args, "--ctl") {
         ctl::spawn(PathBuf::from(p), ctx.log.clone());
     }
@@ -295,7 +300,7 @@ impl Ctx {
 
         let alive = Arc::new(AtomicBool::new(true));
         let child: Arc<Mutex<Option<std::process::Child>>> = Arc::new(Mutex::new(None));
-        let video = spawn_video(out.clone(), bitrate, alive.clone(), child.clone());
+        let video = spawn_video(out.clone(), bitrate, alive.clone(), child.clone(), self.log.clone());
 
         let mut s = s;
         let mut skipped = 0u32;
@@ -412,13 +417,21 @@ impl Ctx {
 /// à 1 Mo pour que cette écriture ne bloque jamais, puis on lit tant que le tube
 /// se remplit encore (attente de 3 ms au plus) : on obtient l'image entière, que le
 /// PC décode sans jamais deviner où elle se termine.
+///
+/// Si `screenrecord` échoue au démarrage, la session n'est plus fermée (le PC
+/// bouclait : fenêtre noire, « connexion perdue », reconnexion) : la raison
+/// (sa sortie d'erreur) est journalisée et envoyée au PC (message 3), les
+/// `screenrecord` orphelins qui gardent l'encodeur sont arrêtés, et on réessaie
+/// avec un délai croissant.
 fn spawn_video(
     out: Out,
     bitrate: u32,
     alive: Arc<AtomicBool>,
     child: Arc<Mutex<Option<std::process::Child>>>,
+    log: Arc<Mutex<Logger>>,
 ) -> thread::JoinHandle<String> {
     thread::spawn(move || -> String {
+        let logl = |m: &str| log.lock().unwrap_or_else(|p| p.into_inner()).line(m);
         let mut buf = vec![0u8; 1 << 20];
         let mut frame: Vec<u8> = Vec::with_capacity(1 << 20);
         let mut quick_fails = 0;
@@ -428,13 +441,14 @@ fn spawn_video(
                 .args(["--output-format=h264", &format!("--bit-rate={bitrate}"), "--time-limit=180", "-"])
                 .stdin(Stdio::null())
                 .stdout(Stdio::piped())
-                .stderr(Stdio::null())
+                .stderr(Stdio::piped())
                 .spawn();
             let mut c = match spawned {
                 Ok(c) => c,
                 Err(e) => return format!("screenrecord introuvable : {e}"),
             };
             let mut so = c.stdout.take().expect("stdout piped");
+            let mut se = c.stderr.take();
             pipe_grow(&so);
             *child.lock().unwrap_or_else(|p| p.into_inner()) = Some(c);
             'proc: loop {
@@ -459,15 +473,32 @@ fn spawn_video(
                 let _ = c.kill();
                 let _ = c.wait();
             }
+            if !alive.load(Ordering::SeqCst) {
+                break;
+            }
             if started.elapsed() < Duration::from_secs(2) {
                 quick_fails += 1;
-                if quick_fails >= 5 {
-                    alive.store(false, Ordering::SeqCst);
-                    let _ = out.lock().unwrap_or_else(|p| p.into_inner()).shutdown(std::net::Shutdown::Both);
-                    return "screenrecord échoue au démarrage (5 fois)".into();
+                let mut why = String::new();
+                if let Some(e) = se.as_mut() {
+                    let _ = e.read_to_string(&mut why);
                 }
-                thread::sleep(Duration::from_millis(300));
+                let why = why.lines().rev().find(|l| !l.trim().is_empty()).unwrap_or("sans message").trim().to_string();
+                logl(&format!("screenrecord a échoué au démarrage ({quick_fails}) : {why}"));
+                if quick_fails == 2 {
+                    let n = kill_stale_screenrecord();
+                    if n > 0 {
+                        logl(&format!("{n} screenrecord orphelin(s) arrêté(s) (encodeur occupé)"));
+                    }
+                }
+                if quick_fails >= 3 {
+                    let _ = send_msg(&out, 3, format!("screenrecord échoue : {why}").as_bytes());
+                }
+                // 0,3 s, puis jusqu'à 5 s entre deux essais : la session reste ouverte.
+                thread::sleep(Duration::from_millis((300 * quick_fails as u64).min(5000)));
             } else {
+                if quick_fails >= 3 {
+                    let _ = send_msg(&out, 3, b"");
+                }
                 quick_fails = 0;
             }
         }
@@ -722,6 +753,39 @@ fn b64_decode(s: &str) -> Option<Vec<u8>> {
         }
     }
     Some(out)
+}
+
+/// Arrête les `screenrecord --output-format=h264` sans parent vivant de ce service
+/// (restés d'un service précédent arrêté brutalement) : ils peuvent garder
+/// l'encodeur matériel jusqu'à 3 min. Lecture de /proc, sans pkill -f (qui se
+/// trouverait lui-même dans la ligne de commande du shell).
+fn kill_stale_screenrecord() -> usize {
+    let me = std::process::id().to_string();
+    let mut n = 0;
+    let Ok(rd) = fs::read_dir("/proc") else { return 0 };
+    for e in rd.filter_map(Result::ok) {
+        let name = e.file_name().to_string_lossy().into_owned();
+        if !name.bytes().all(|b| b.is_ascii_digit()) {
+            continue;
+        }
+        let cmd = fs::read(e.path().join("cmdline")).unwrap_or_default();
+        let args: Vec<String> = cmd.split(|b| *b == 0).map(|a| String::from_utf8_lossy(a).into_owned()).collect();
+        // Nom du programme en 1er argument (binaire) ou 2e (lancé par un interpréteur).
+        let is_ours = args.iter().take(2).any(|a| a.ends_with("screenrecord")) && args.iter().any(|a| a == "--output-format=h264");
+        if !is_ours {
+            continue;
+        }
+        // Parent = ce service : c'est le screenrecord de la session en cours, on le garde.
+        let stat = fs::read_to_string(e.path().join("stat")).unwrap_or_default();
+        let ppid = stat.rsplit(')').next().and_then(|r| r.split_whitespace().nth(1)).unwrap_or("");
+        if ppid == me {
+            continue;
+        }
+        if Command::new("kill").arg(&name).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).status().is_ok_and(|s| s.success()) {
+            n += 1;
+        }
+    }
+    n
 }
 
 /// Taille de l'écran (taille forcée si définie) via `wm size`.
