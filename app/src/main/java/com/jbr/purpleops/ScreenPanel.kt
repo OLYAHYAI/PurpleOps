@@ -119,21 +119,32 @@ class ScreenPanel(
         toggle.text = "ARRÊTER"
         status.text = "Démarrage…"
         scope.launch(Dispatchers.IO) {
+            var started: Process? = null
             try {
                 val opts = (if (dim.isChecked) " --dim" else "") +
                     (if (ai.isChecked) " --ctl /data/local/kali/opt/purpleops-mcp/screenctl.sock" else "")
                 val p = ProcessBuilder("su", "-c", "exec '$bin' serve --usb$opts 2>&1")
                     .redirectErrorStream(true).start()
+                started = p
                 proc = p
                 p.inputStream.bufferedReader().forEachLine { line ->
                     act.runOnUiThread { onLine(line) }
                 }
                 val code = p.waitFor()
-                act.runOnUiThread { setIdle("Service arrêté (code $code)") }
+                // Seulement si ce processus est encore le service courant : après
+                // ARRÊTER puis ACTIVER, la fin de l'ancien ne doit pas remettre
+                // l'écran à « ACTIVER » alors que le nouveau tourne.
+                act.runOnUiThread { if (proc === p) setIdle("Service arrêté (code $code)") }
             } catch (e: Exception) {
-                act.runOnUiThread { append("[erreur] ${e.message}"); setIdle("Erreur au démarrage") }
+                val mine = proc == null || proc === started
+                act.runOnUiThread {
+                    if (mine) {
+                        append("[erreur] ${e.message}")
+                        setIdle("Erreur au démarrage")
+                    }
+                }
             } finally {
-                proc = null
+                if (proc === started) proc = null
             }
         }
     }

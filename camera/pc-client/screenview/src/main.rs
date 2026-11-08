@@ -468,6 +468,7 @@ fn recv_loop(mut s: TcpStream, shown: Shown, stats: Arc<Mutex<String>>, clip: Se
     let mut msg: Vec<u8> = Vec::new();
     let (mut frames, mut errors, mut bytes, mut dec_time) = (0u32, 0u32, 0usize, Duration::ZERO);
     let mut since = Instant::now();
+    let mut phone_state = String::new();
     loop {
         let mut head = [0u8; 5];
         s.read_exact(&mut head)?;
@@ -500,6 +501,14 @@ fn recv_loop(mut s: TcpStream, shown: Shown, stats: Arc<Mutex<String>>, clip: Se
             2 => {
                 let _ = clip.send(String::from_utf8_lossy(&msg).into_owned());
             }
+            3 => {
+                // État envoyé par le téléphone (ex. « screenrecord échoue : … ») ; vide = résolu.
+                let t = String::from_utf8_lossy(&msg).into_owned();
+                if !t.is_empty() {
+                    log(&format!("téléphone : {t}"));
+                }
+                phone_state = t;
+            }
             _ => {} // type inconnu : ignoré (compatibilité future)
         }
 
@@ -513,6 +522,9 @@ fn recv_loop(mut s: TcpStream, shown: Shown, stats: Arc<Mutex<String>>, clip: Se
             );
             if errors > 0 {
                 line += &format!(" · {errors} erreurs");
+            }
+            if !phone_state.is_empty() {
+                line = format!("téléphone : {phone_state}");
             }
             *stats.lock().unwrap() = line;
             (frames, errors, bytes, dec_time) = (0, 0, 0, Duration::ZERO);
@@ -796,11 +808,22 @@ fn fix_route_priority() {
     // Laisse le temps à la tâche (si elle est installée) d'agir sur une carte qui vient d'apparaître.
     thread::sleep(Duration::from_secs(10));
     let m = metric();
-    if m >= 1000 {
+    let task = powershell(&format!(
+        "if (Get-ScheduledTask -TaskName '{TASK_NAME}' -ErrorAction SilentlyContinue) {{ 'oui' }} else {{ 'non' }}"
+    ));
+    // Tâche absente = rien ne réappliquera le réglage après un redémarrage, même si
+    // la métrique est bonne maintenant (réglée à la main) : on l'installe quand même.
+    if m >= 1000 && task.as_deref() != Some("non") {
         return;
     }
-    log(&format!("carte USB du téléphone prioritaire (métrique {m}) : installation de la tâche planifiée"));
-    let set = b64_utf16(&format!("Get-NetAdapter | {NCM_FILTER} | Set-NetIPInterface -InterfaceMetric 5000"));
+    log(&format!("métrique {m}, tâche planifiée : {} — installation", task.as_deref().unwrap_or("?")));
+    // ActiveStore (immédiat) ET PersistentStore (survit au redémarrage) : seul le
+    // premier était modifié, d'où le retour de la carte du téléphone au démarrage.
+    let set = b64_utf16(&format!(
+        "Get-NetAdapter | {NCM_FILTER} | ForEach-Object {{ \
+         Set-NetIPInterface -InterfaceIndex $_.ifIndex -InterfaceMetric 5000; \
+         Set-NetIPInterface -InterfaceAlias $_.Name -PolicyStore PersistentStore -InterfaceMetric 5000 -ErrorAction SilentlyContinue }}"
+    ));
     let install = format!(
         r#"$ErrorActionPreference = 'Stop'
 $a = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument '-NoProfile -WindowStyle Hidden -EncodedCommand {set}'

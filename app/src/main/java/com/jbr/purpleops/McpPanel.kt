@@ -34,9 +34,17 @@ class McpPanel(
     private val updateBtn: TextView = root.findViewById(R.id.mcpUpdate)
     private val prefs = act.getSharedPreferences("purpleops", Context.MODE_PRIVATE)
 
-    // Crochets : le motif ne correspond pas à la ligne de commande de pgrep/pkill
-    // eux-mêmes (qui contient « purpleops-mc[p] », pas « purpleops-mcp »).
-    private val PATTERN = "purpleops-mc[p]/server.py"
+    // « Actif » = quelque chose ÉCOUTE sur le port 8765 (0x223D), lu dans la table
+    // réseau du noyau. L'ancienne détection (pgrep -f "purpleops-mc[p]/server.py")
+    // se trouvait elle-même dans la ligne de commande du shell (qui contenait aussi
+    // « …purpleops-mcp/server.py » via FIND) et ne correspondait pas au vrai
+    // processus (« venv/bin/python server.py ») : faux « Actif ».
+    private val LISTEN = "cat /proc/net/tcp /proc/net/tcp6 2>/dev/null | grep -qiE ':223D [0-9A-F:]+ 0A' && echo LISTEN"
+
+    /** Processus dont le dossier courant est celui du serveur (lancé par kali-mcp-start.sh). */
+    private fun pids(chroot: String) = "for p in /proc/[0-9]*; do " +
+        "[ \"\$(readlink \$p/cwd 2>/dev/null)\" = '$chroot/opt/purpleops-mcp' ] && echo \${p#/proc/}; done"
+
     private val FIND = "for R in /data/local/kali /data/local/debian; do " +
         "[ -f \$R/opt/purpleops-mcp/server.py ] && echo \$R && break; done"
 
@@ -56,18 +64,22 @@ class McpPanel(
 
     /** Où est installé le serveur, et tourne-t-il ? */
     private suspend fun refresh(): String? {
-        val (_, out) = RootRunner.runAndroidRoot("$FIND; pgrep -f '$PATTERN' >/dev/null && echo RUNNING")
+        val (_, out) = RootRunner.runAndroidRoot("$FIND; $LISTEN")
         val lines = out.lines().map { it.trim() }.filter { it.isNotEmpty() }
         val chroot = lines.firstOrNull { it.startsWith("/data/local/") }
-        running = "RUNNING" in lines
+        running = "LISTEN" in lines
         val where = chroot?.substringAfterLast('/') ?: "?"
         when {
             chroot == null -> {
                 status.text = "Serveur MCP introuvable (ni /data/local/kali ni /data/local/debian → /opt/purpleops-mcp)"
                 toggle.isEnabled = false
             }
-            running -> status.text = "Actif — chroot $where, port 8765 sur l'IP Tailscale"
-            else -> status.text = "Arrêté — installé dans le chroot $where"
+            running -> status.text = "Actif — chroot $where, écoute sur le port 8765 (IP Tailscale)"
+            else -> {
+                val (_, tail) = RootRunner.runAndroidRoot("tail -n 4 $chroot/var/log/purpleops-mcp.out 2>/dev/null")
+                status.text = "Arrêté — chroot $where" +
+                    (if (tail.isNotBlank()) "\nDernière sortie : " + tail.trim().lines().takeLast(3).joinToString(" / ") else "")
+            }
         }
         toggle.text = if (running) "ARRÊTER" else "DÉMARRER"
         return chroot
@@ -117,7 +129,7 @@ class McpPanel(
                 return@launch
             }
             if (running) {
-                RootRunner.runAndroidRoot("pkill -f '$PATTERN'")
+                RootRunner.runAndroidRoot("for i in \$(${pids(chroot)}); do kill \$i; done")
                 delay(800)
                 running = false
             }
@@ -127,7 +139,9 @@ class McpPanel(
 
     fun stop() {
         scope.launch {
-            RootRunner.runAndroidRoot("pkill -f '$PATTERN'")
+            val (_, out) = RootRunner.runAndroidRoot(FIND)
+            val chroot = out.lines().map { it.trim() }.firstOrNull { it.startsWith("/data/local/") } ?: return@launch
+            RootRunner.runAndroidRoot("for i in \$(${pids(chroot)}); do kill \$i; done")
             delay(800)
             refresh()
         }
