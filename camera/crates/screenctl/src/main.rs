@@ -57,7 +57,9 @@ Usage : screenctl serve [--usb] [--iface ncm0] [--port 8099] [--dir /data/local/
   --ctl CHEMIN  prise de commande locale pour le serveur MCP (pilotage par l'IA),
             ex. /data/local/kali/opt/purpleops-mcp/screenctl.sock (root 0600) ; voir ctl.rs
   --dim     éteint l'écran du téléphone pendant le pilotage (l'image continue
-            d'arriver au PC) et le garde éveillé ; tout est rétabli en fin de session
+            d'arriver au PC) ; la valeur d'origine est rétablie en fin de session
+        (toujours, avec ou sans --dim : l'écran est gardé éveillé pendant une session,
+        veille repoussée à 24 h puis rétablie à la fin, à usb-off ou au redémarrage)
   --listen  ADR:PORT fixe (tests) au lieu de suivre l'interface";
 
 fn main() -> ExitCode {
@@ -65,6 +67,7 @@ fn main() -> ExitCode {
     let dir = PathBuf::from(opt(&args, "--dir").unwrap_or_else(|| DEFAULT_DIR.into()));
     let res = match args.first().map(String::as_str) {
         Some("usb-off") => {
+            restore_awake(&dir);
             usb_functions("");
             say("Prise USB remise en mode normal.");
             Ok(())
@@ -121,6 +124,8 @@ fn serve(args: &[String], dir: PathBuf) -> io::Result<()> {
         ctx.log(&format!("{older} ancienne(s) instance(s) du service arrêtée(s)"));
         thread::sleep(Duration::from_millis(500)); // libération du port
     }
+    // Réglages de veille laissés par un service tué en pleine session.
+    restore_awake(&ctx.dir);
     let stale = kill_stale_screenrecord();
     if stale > 0 {
         ctx.log(&format!("{stale} screenrecord orphelin(s) d'un service précédent arrêté(s)"));
@@ -302,6 +307,7 @@ impl Ctx {
         let out: Out = Arc::new(Mutex::new(first));
         self.log(&format!("stream {peer} {w}x{h} h264 {bitrate} bit/s"));
         let helper = Helper::start(Some(out.clone()), self.log.clone());
+        let awake = Awake::start(&self.dir, &self.log);
         let dimmer = if self.dim { Dimmer::start(self.log.clone()) } else { None };
 
         let mut touch = uinput::Touch::new(w, h).map_err(|e| self.log(&format!("uinput tactile : {e}"))).ok();
@@ -314,6 +320,7 @@ impl Ctx {
         let mut s = s;
         let mut skipped = 0u32;
         let mut fallback_down: Option<(u32, u32)> = None;
+        let mut last_input = Instant::now();
         let res: io::Result<()> = (|| loop {
             if !alive.load(Ordering::SeqCst) {
                 return Ok(());
@@ -321,6 +328,15 @@ impl Ctx {
             let mut op = [0u8; 1];
             if s.read_exact(&mut op).is_err() {
                 return Ok(());
+            }
+            // Première action après une pause : si l'écran s'est mis en veille entre-temps
+            // (bouton marche/arrêt appuyé sur le téléphone), la touche WAKEUP le rallume
+            // (un toucher seul est ignoré par un écran éteint).
+            if matches!(op[0], 0x10 | 0x20 | 0x21 | 0x30) {
+                if last_input.elapsed() > Duration::from_secs(10) {
+                    wake_screen();
+                }
+                last_input = Instant::now();
             }
             match op[0] {
                 0x00 => {}
@@ -406,6 +422,7 @@ impl Ctx {
         drop(kbd);
         helper.stop();
         drop(dimmer);
+        drop(awake);
         let why = if video.is_finished() {
             video.join().unwrap_or_else(|_| "fil vidéo en erreur".into())
         } else {
@@ -493,6 +510,10 @@ fn spawn_video(
                 }
                 let why = why.lines().rev().find(|l| !l.trim().is_empty()).unwrap_or("sans message").trim().to_string();
                 logl(&format!("screenrecord a échoué au démarrage ({quick_fails}) : {why}"));
+                // Écran en veille ? Un écran éteint fait échouer `screenrecord` : on le rallume.
+                if quick_fails == 1 || quick_fails % 4 == 0 {
+                    wake_screen();
+                }
                 if quick_fails == 2 {
                     let n = kill_stale_screenrecord();
                     if n > 0 {
@@ -649,16 +670,15 @@ impl Helper {
 }
 
 /// Écran éteint pendant le pilotage : rétroéclairage à 0 (la composition continue,
-/// le PC reçoit toujours l'image) et écran gardé éveillé. C'est l'écran qui
-/// consomme le plus : moins de décharge quand le port USB du PC alimente peu.
-/// La luminosité automatique peut réécrire la valeur : on la remet à 0 toutes
-/// les 0,5 s. À la fin de la session, valeurs d'origine restaurées.
+/// le PC reçoit toujours l'image ; l'écran reste éveillé grâce à `Awake`). C'est
+/// l'écran qui consomme le plus : moins de décharge quand le port USB du PC
+/// alimente peu. La luminosité automatique peut réécrire la valeur : on la remet
+/// à 0 toutes les 0,5 s. À la fin de la session, la valeur d'origine est rétablie.
 struct Dimmer {
     stop: Arc<AtomicBool>,
     thread: Option<thread::JoinHandle<()>>,
     path: PathBuf,
     saved: String,
-    stay_on: String,
 }
 
 impl Dimmer {
@@ -674,9 +694,6 @@ impl Dimmer {
             return None;
         };
         let saved = fs::read_to_string(&path).unwrap_or_default().trim().to_string();
-        let stay_on = setting_get("stay_on_while_plugged_in");
-        // 7 = rester allumé sur secteur + USB + sans fil, le temps de la session.
-        setting_put("stay_on_while_plugged_in", "7");
         let stop = Arc::new(AtomicBool::new(false));
         let (st, p) = (stop.clone(), path.clone());
         let thread = thread::spawn(move || {
@@ -686,7 +703,7 @@ impl Dimmer {
             }
         });
         logl(&format!("écran du téléphone éteint pendant la session ({})", path.display()));
-        Some(Dimmer { stop, thread: Some(thread), path, saved, stay_on })
+        Some(Dimmer { stop, thread: Some(thread), path, saved })
     }
 }
 
@@ -699,13 +716,12 @@ impl Drop for Dimmer {
         if !self.saved.is_empty() {
             let _ = fs::write(&self.path, &self.saved);
         }
-        setting_put("stay_on_while_plugged_in", if self.stay_on.is_empty() { "0" } else { &self.stay_on });
     }
 }
 
-fn setting_get(key: &str) -> String {
+fn setting_get(ns: &str, key: &str) -> String {
     Command::new("settings")
-        .args(["get", "global", key])
+        .args(["get", ns, key])
         .stdin(Stdio::null())
         .stderr(Stdio::null())
         .output()
@@ -715,13 +731,79 @@ fn setting_get(key: &str) -> String {
         .unwrap_or_default()
 }
 
-fn setting_put(key: &str, val: &str) {
+fn setting_put(ns: &str, key: &str, val: &str) {
     let _ = Command::new("settings")
-        .args(["put", "global", key, val])
+        .args(["put", ns, key, val])
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .status();
+}
+
+fn setting_delete(ns: &str, key: &str) {
+    let _ = Command::new("settings")
+        .args(["delete", ns, key])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status();
+}
+
+/// Touche WAKEUP (224) : rallume l'écran s'il est en veille, sans effet sinon.
+/// Lancée dans un fil à part (la commande `input` démarre une JVM, ~0,5 s).
+fn wake_screen() {
+    thread::spawn(|| input(&["keyevent", "224"]));
+}
+
+/// Garde l'écran éveillé pendant une session. Un écran réellement en veille ne
+/// produit plus d'image (`screenrecord` se tait ou échoue) : fenêtre noire côté PC.
+/// Le réglage « rester allumé en charge » seul ne suffit pas, ce téléphone se
+/// considère « en décharge » sur le port USB du PC (courant d'entrée limité à 0) :
+/// on porte donc aussi le délai de mise en veille à 24 h, le temps de la session.
+/// Les valeurs d'origine sont écrites dans un fichier et rétablies à la fin de la
+/// session, à l'arrêt du service (`usb-off`) et au démarrage suivant : un `kill`
+/// du service ne doit jamais laisser le téléphone sans veille.
+struct Awake {
+    dir: PathBuf,
+}
+
+const AWAKE_FILE: &str = "screenctl_awake";
+
+impl Awake {
+    fn start(dir: &Path, log: &Arc<Mutex<Logger>>) -> Awake {
+        restore_awake(dir);
+        let timeout = setting_get("system", "screen_off_timeout");
+        let stay_on = setting_get("global", "stay_on_while_plugged_in");
+        let _ = fs::write(dir.join(AWAKE_FILE), format!("{timeout}\n{stay_on}\n"));
+        setting_put("system", "screen_off_timeout", "86400000");
+        // 7 = rester allumé sur secteur, USB et sans fil (utile si le port charge).
+        setting_put("global", "stay_on_while_plugged_in", "7");
+        wake_screen();
+        log.lock().unwrap_or_else(|p| p.into_inner()).line("écran gardé éveillé pendant la session (veille repoussée à 24 h)");
+        Awake { dir: dir.to_path_buf() }
+    }
+}
+
+impl Drop for Awake {
+    fn drop(&mut self) {
+        restore_awake(&self.dir);
+    }
+}
+
+/// Rétablit les réglages de veille mémorisés par `Awake::start`, s'il y en a.
+fn restore_awake(dir: &Path) {
+    let file = dir.join(AWAKE_FILE);
+    let Ok(saved) = fs::read_to_string(&file) else { return };
+    let mut it = saved.lines();
+    let timeout = it.next().unwrap_or("").trim();
+    let stay_on = it.next().unwrap_or("").trim();
+    if timeout.is_empty() {
+        setting_delete("system", "screen_off_timeout");
+    } else {
+        setting_put("system", "screen_off_timeout", timeout);
+    }
+    setting_put("global", "stay_on_while_plugged_in", if stay_on.is_empty() { "0" } else { stay_on });
+    let _ = fs::remove_file(file);
 }
 
 /// .../com.jbr.purpleops-XXX/lib/arm64/libscreenctl.so -> .../base.apk
@@ -976,5 +1058,21 @@ mod tests {
         assert_eq!(opt(&a, "--iface").as_deref(), Some("ncm0"));
         assert_eq!(opt(&a, "--port").as_deref(), Some("9"));
         assert_eq!(opt(&a, "--absent"), None);
+    }
+
+    #[test]
+    fn awake_file_is_written_then_removed() {
+        let dir = std::env::temp_dir().join(format!("screenctl-awake-{}", std::process::id()));
+        let _ = fs::create_dir_all(&dir);
+        let log = Arc::new(Mutex::new(Logger::open(&dir.join("t.log"))));
+        let awake = Awake::start(&dir, &log);
+        assert!(dir.join(AWAKE_FILE).exists(), "valeurs d'origine mémorisées");
+        drop(awake);
+        assert!(!dir.join(AWAKE_FILE).exists(), "réglages rétablis, fichier retiré");
+        // Un fichier laissé par un service tué est traité au démarrage suivant / à usb-off.
+        fs::write(dir.join(AWAKE_FILE), "60000\n0\n").unwrap();
+        restore_awake(&dir);
+        assert!(!dir.join(AWAKE_FILE).exists());
+        let _ = fs::remove_dir_all(&dir);
     }
 }

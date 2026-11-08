@@ -24,10 +24,20 @@ connexion réseau et au démarrage, elle remet la carte du téléphone en métri
 `Unregister-ScheduledTask -TaskName 'PurpleOps - telephone USB en derniere priorite reseau'`.
 
 **Écran éteint** (option de l'onglet Écran) : le rétroéclairage est coupé pendant le
-pilotage, et l'image continue d'arriver au PC. Le téléphone est aussi gardé
-éveillé, puis tout est rétabli en fin de session. Utile quand le port USB du PC
+pilotage, et l'image continue d'arriver au PC. Utile quand le port USB du PC
 alimente peu (un port USB-A d'ordinateur fournit ~2,5 W, moins que la
 consommation écran allumé).
+
+**Veille** : un écran réellement en veille ne produit plus aucune image (fenêtre
+noire sur le PC). Pendant une session, avec ou sans l'option ci-dessus, le service
+repousse donc la mise en veille à 24 h (`screen_off_timeout`) et active « rester
+allumé » ; l'écran est rallumé au début de la session, quand `screenrecord` échoue
+(écran éteint) et à la première action au PC après 10 s de pause (touche WAKEUP :
+un toucher seul est ignoré par un écran éteint). Le réglage « rester allumé en
+charge » ne suffisait pas : sur le port USB du PC ce téléphone se déclare en
+décharge. Les valeurs d'origine sont mémorisées dans `/data/local/soc/screenctl_awake`
+et rétablies en fin de session, à ARRÊTER (`usb-off`) et au démarrage suivant du
+service, même s'il a été tué en pleine session.
 
 Case **Démarrer automatiquement** (décochée par défaut) : le service démarre avec
 l'appli et continue de tourner quand on la ferme. Débrancher pour sortir avec la
