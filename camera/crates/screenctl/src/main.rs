@@ -26,6 +26,7 @@
 //!         0x21 TEXT len + UTF-8   | 0x22 CLIP len + UTF-8 (presse-papiers du PC)
 //!         0x30 SCROLL x y dy(i32) | 0x00 PING
 
+mod ctl;
 mod uinput;
 
 use std::fs::{self, File, OpenOptions};
@@ -52,6 +53,8 @@ Usage : screenctl serve [--usb] [--iface ncm0] [--port 8099] [--dir /data/local/
         screenctl usb-off           remet la prise USB en mode normal
 
   --usb     passe la prise USB en carte réseau (NCM) et la réarme si on rebranche
+  --ctl CHEMIN  prise de commande locale pour le serveur MCP (pilotage par l'IA),
+            ex. /data/local/kali/opt/purpleops-mcp/screenctl.sock (root 0600) ; voir ctl.rs
   --dim     éteint l'écran du téléphone pendant le pilotage (l'image continue
             d'arriver au PC) et le garde éveillé ; tout est rétabli en fin de session
   --listen  ADR:PORT fixe (tests) au lieu de suivre l'interface";
@@ -108,6 +111,9 @@ fn serve(args: &[String], dir: PathBuf) -> io::Result<()> {
     let ctx = Ctx { dir, log, dim };
     ctx.log(&format!("start iface={} usb={usb}", iface.as_deref().unwrap_or("-")));
     leave_app_cgroup();
+    if let Some(p) = opt(args, "--ctl") {
+        ctl::spawn(PathBuf::from(p), ctx.log.clone());
+    }
 
     loop {
         let addr = match (fixed, iface.as_deref()) {
@@ -281,7 +287,7 @@ impl Ctx {
         first.write_all(&h.to_be_bytes())?;
         let out: Out = Arc::new(Mutex::new(first));
         self.log(&format!("stream {peer} {w}x{h} h264 {bitrate} bit/s"));
-        let helper = Helper::start(out.clone(), self.log.clone());
+        let helper = Helper::start(Some(out.clone()), self.log.clone());
         let dimmer = if self.dim { Dimmer::start(self.log.clone()) } else { None };
 
         let mut touch = uinput::Touch::new(w, h).map_err(|e| self.log(&format!("uinput tactile : {e}"))).ok();
@@ -519,7 +525,9 @@ struct Helper {
 }
 
 impl Helper {
-    fn start(out: Out, log: Arc<Mutex<Logger>>) -> Helper {
+    /// `out` : où envoyer les changements du presse-papiers du téléphone (session
+    /// écran) ; `None` pour la prise de commande de l'IA (frappe seulement).
+    fn start(out: Option<Out>, log: Arc<Mutex<Logger>>) -> Helper {
         let h = Helper { stdin: Arc::new(Mutex::new(None)), child: Arc::new(Mutex::new(None)) };
         let (stdin, child) = (h.stdin.clone(), h.child.clone());
         thread::spawn(move || {
@@ -565,7 +573,7 @@ impl Helper {
                 for l in lines.map_while(Result::ok) {
                     if let Some(b) = l.strip_prefix("C ") {
                         if let Some(text) = b64_decode(b) {
-                            if send_msg(&out, 2, &text).is_err() {
+                            if out.as_ref().is_some_and(|o| send_msg(o, 2, &text).is_err()) {
                                 break;
                             }
                         }

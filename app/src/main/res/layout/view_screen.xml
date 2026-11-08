@@ -46,6 +46,11 @@
         android:textColor="@color/text" android:textSize="13sp" android:buttonTint="@color/neon"
         android:paddingBottom="6dp" />
 
+    <CheckBox android:id="@+id/scrAi" android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:text="Autoriser le pilotage par l'IA (serveur MCP : captures, lecture de l'écran, gestes, texte)"
+        android:textColor="@color/text" android:textSize="13sp" android:buttonTint="@color/neon"
+        android:paddingBottom="6dp" />
+
     <TextView android:id="@+id/scrPcs" android:layout_width="match_parent" android:layout_height="wrap_content"
         android:text="PC appairés : —" android:textColor="@color/muted" android:textSize="12sp" android:paddingBottom="8dp" />
 

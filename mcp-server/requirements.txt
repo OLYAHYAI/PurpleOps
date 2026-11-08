@@ -1,3 +1,4 @@
 fastmcp>=4,<5
 pyyaml>=6
 uvicorn>=0.30
+pillow>=10      # optionnel : réduit les captures d'écran du téléphone (phone_screenshot)

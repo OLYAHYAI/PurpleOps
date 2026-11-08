@@ -55,6 +55,9 @@
                 android:paddingStart="16dp" android:paddingEnd="16dp" android:paddingTop="9dp" android:paddingBottom="9dp"
                 android:text="DÉMARRER" android:textColor="@color/neon" android:textSize="12sp" />
         </LinearLayout>
+        <TextView android:id="@+id/mcpUpdate" android:layout_width="wrap_content" android:layout_height="wrap_content"
+            android:text="Mettre à jour le serveur MCP (depuis GitHub, config et jeton conservés)"
+            android:textColor="@color/cyan" android:textSize="13sp" android:paddingTop="8dp" android:paddingBottom="4dp" />
         <CheckBox android:id="@+id/mcpAuto" android:layout_width="match_parent" android:layout_height="wrap_content"
             android:text="Démarrer automatiquement à l'ouverture de PurpleOps" android:textColor="@color/text"
             android:textSize="13sp" android:buttonTint="@color/neon" android:paddingBottom="10dp" />

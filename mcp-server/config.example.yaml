@@ -14,6 +14,11 @@ log_file: "/var/log/purpleops-mcp.log"
 
 exec_timeout_s: 300
 
+# --- Pilotage de l'écran du téléphone (outils phone_*) ------------------------
+# Prise Unix ouverte par screenctl (onglet Écran de PurpleOps) dans ce chroot,
+# uniquement si « Autoriser le pilotage par l'IA » est cochée sur le téléphone.
+phone_socket: "/opt/purpleops-mcp/screenctl.sock"
+
 # --- Entrée dans le chroot Kali ----------------------------------------------
 # ARCHI : le serveur tourne DANS le chroot Kali (outils locaux). Il n'y a donc
 # aucun saut de chroot à faire -> préfixe vide. Les commandes s'exécutent

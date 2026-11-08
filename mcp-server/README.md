@@ -33,12 +33,38 @@ Chaque appel écrit une ligne JSON dans `log_file` (phases `request`/`result`/`r
 Le décodeur + les règles custom côté manager suivent la **procédure de changement**
 (branche Git, backup, `wazuh-analysisd -t`, restart, non-régression) — étape ultérieure.
 
+## Pilotage de l'écran du téléphone (outils `phone_*`)
+Pour que Claude Desktop puisse manipuler le téléphone, à la manière de l'extension Chrome :
+
+| Outil | Effet |
+| --- | --- |
+| `phone_read_screen` | éléments affichés (texte, bouton, champ) avec leur **centre en pixels écran**, via uiautomator |
+| `phone_screenshot` | capture d'écran (réduite en JPEG si Pillow est installé, sinon PNG) + facteur de conversion des coordonnées |
+| `phone_tap` / `phone_swipe` | toucher / glisser (appui long : même point, ~800 ms) |
+| `phone_key` | back, home, recents, enter, delete, flèches… (liste fermée) |
+| `phone_type` | texte dans le champ actif, accents et emoji compris (aide Java de l'APK) |
+
+**Garde-fous**
+- **Décision sur le téléphone** : onglet Écran → « Autoriser le pilotage par l'IA » (décoché
+  par défaut). Coché, `screenctl --ctl` ouvre une prise Unix root 0600 dans
+  `/data/local/kali/opt/purpleops-mcp/screenctl.sock` (vue `/opt/purpleops-mcp/screenctl.sock`
+  depuis le chroot). Décoché : pas de prise, les outils refusent avec un message clair.
+- Pas de port réseau supplémentaire : la prise est locale ; l'accès distant reste celui du
+  MCP (Tailscale + Bearer).
+- Coordonnées bornées à l'écran, touches en liste fermée, texte ≤ 4096 octets.
+- **Double journal** : audit JSONL fail-closed du MCP (comme `kali_exec`) + journal SOC
+  `/data/local/soc/screenctl.log` (« ia tap 540 1200 »…). Le texte tapé n'est journalisé
+  que par sa longueur ; les captures ne sont pas conservées.
+
 ## Démarrage depuis l'appli (sans commande)
 PurpleOps → **Réglages → Serveur MCP PurpleOps** :
 - l'appli cherche `opt/purpleops-mcp/server.py` dans `/data/local/kali` puis
   `/data/local/debian` et **affiche le chroot où il est installé** ;
 - DÉMARRER / ARRÊTER, et **démarrage automatique à l'ouverture de l'appli**
   (case cochée par défaut, décochable) ;
+- **Mettre à jour le serveur MCP** : récupère le dernier `server.py` depuis GitHub
+  (`purpleops-mcp-update.sh` : config et jeton conservés, syntaxe vérifiée), puis
+  redémarre. Le code du MCP vit dans le chroot et ne suit pas les mises à jour de l'APK ;
 - lancement : script de montage du chroot (`kali-start.sh` / `debian-start.sh`),
   puis `kali-mcp-start.sh` dans le chroot, détaché (`setsid`) et sorti du cgroup
   de l'appli (il survit à sa fermeture). Sortie : `<chroot>/var/log/purpleops-mcp.out`.
