@@ -415,6 +415,13 @@ fn session(mut s: TcpStream, mbps: u32) -> io::Result<bool> {
                 let _ = ev_tx.send(Ev::Key(code, if altgr { 0 } else { mods }));
             } else if (ctrl || alt) && !altgr {
                 if let Some(code) = letter_key(k) {
+                    // Ctrl+V : on envoie d'abord le presse-papiers du PC (même s'il a été
+                    // copié avant l'ouverture de la fenêtre), puis la touche (méthode scrcpy).
+                    if k == Key::V && ctrl {
+                        if let Some(t) = clip.current() {
+                            let _ = ev_tx.send(Ev::Clip(t));
+                        }
+                    }
                     let _ = ev_tx.send(Ev::Key(code, mods));
                 }
             }
@@ -530,6 +537,12 @@ impl ClipSync {
         if clipboard::get().as_deref() != Some(text) && clipboard::set(text) {
             self.seq = clipboard::sequence();
         }
+    }
+
+    /// Contenu actuel du presse-papiers du PC (pour Ctrl+V).
+    fn current(&mut self) -> Option<String> {
+        self.seq = clipboard::sequence();
+        clipboard::get().filter(|t| !t.is_empty() && t.len() < 1 << 20)
     }
 
     /// Texte copié sur le PC depuis la dernière fois (vérifié toutes les 150 ms).
@@ -761,10 +774,17 @@ fn find_phone() -> Option<String> {
     s.parse::<std::net::Ipv4Addr>().ok().map(|ip| ip.to_string())
 }
 
+const TASK_NAME: &str = "PurpleOps - telephone USB en derniere priorite reseau";
+
 /// Le partage de connexion d'Android donne aussi au PC une route Internet par le
-/// téléphone ; la carte USB (426 Mbit/s) passe alors devant le Wi-Fi. On la met en
-/// dernière priorité (métrique 5000) : une confirmation administrateur, une fois
-/// (Windows retient le réglage pour cette carte), puis vérification.
+/// téléphone, et Windows préfère cette carte « filaire » au Wi-Fi. Régler la
+/// métrique une fois ne suffit pas : Windows la perd (redémarrage, nouvelle carte),
+/// et le PC perdait Internet quand le téléphone passait sur le Wi-Fi de la Nikon.
+///
+/// Correction permanente : une tâche planifiée (compte SYSTEM) remet la carte du
+/// téléphone en dernière priorité (métrique 5000) à chaque connexion réseau
+/// (journal NetworkProfile, événement 10000) et au démarrage. Une confirmation
+/// administrateur, une seule fois ; ensuite plus rien à faire.
 fn fix_route_priority() {
     let metric = || -> u32 {
         powershell(&format!(
@@ -773,13 +793,28 @@ fn fix_route_priority() {
         .and_then(|s| s.parse().ok())
         .unwrap_or(0)
     };
+    // Laisse le temps à la tâche (si elle est installée) d'agir sur une carte qui vient d'apparaître.
+    thread::sleep(Duration::from_secs(10));
     let m = metric();
     if m >= 1000 {
         return;
     }
-    log(&format!("carte USB du téléphone prioritaire (métrique {m}) : élévation demandée"));
-    let inner = format!("Get-NetAdapter | {NCM_FILTER} | Set-NetIPInterface -InterfaceMetric 5000");
-    if !run_elevated("powershell.exe", &format!("-NoProfile -WindowStyle Hidden -EncodedCommand {}", b64_utf16(&inner))) {
+    log(&format!("carte USB du téléphone prioritaire (métrique {m}) : installation de la tâche planifiée"));
+    let set = b64_utf16(&format!("Get-NetAdapter | {NCM_FILTER} | Set-NetIPInterface -InterfaceMetric 5000"));
+    let install = format!(
+        r#"$ErrorActionPreference = 'Stop'
+$a = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument '-NoProfile -WindowStyle Hidden -EncodedCommand {set}'
+$c = Get-CimClass -Namespace Root/Microsoft/Windows/TaskScheduler -ClassName MSFT_TaskEventTrigger
+$e = New-CimInstance -CimClass $c -ClientOnly
+$e.Enabled = $true
+$e.Subscription = '<QueryList><Query Id="0" Path="Microsoft-Windows-NetworkProfile/Operational"><Select Path="Microsoft-Windows-NetworkProfile/Operational">*[System[(EventID=10000)]]</Select></Query></QueryList>'
+$b = New-ScheduledTaskTrigger -AtStartup
+$p = New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest
+$s = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit (New-TimeSpan -Minutes 2)
+Register-ScheduledTask -TaskName '{TASK_NAME}' -Action $a -Trigger @($e, $b) -Principal $p -Settings $s -Force | Out-Null
+& powershell.exe -NoProfile -EncodedCommand {set}"#
+    );
+    if !run_elevated("powershell.exe", &format!("-NoProfile -WindowStyle Hidden -EncodedCommand {}", b64_utf16(&install))) {
         log("élévation refusée ou impossible : la carte du téléphone reste prioritaire");
         return;
     }
@@ -787,11 +822,11 @@ fn fix_route_priority() {
         thread::sleep(Duration::from_secs(2));
         let m = metric();
         if m >= 1000 {
-            log(&format!("priorité réseau corrigée (métrique {m}) : Internet passe par le Wi-Fi"));
+            log(&format!("tâche « {TASK_NAME} » installée, métrique {m} : Internet passe par le Wi-Fi"));
             return;
         }
     }
-    log("priorité réseau : réglage non constaté après 30 s");
+    log("priorité réseau : réglage non constaté après 30 s (voir le Planificateur de tâches)");
 }
 
 /// Lance un programme en administrateur (fenêtre de confirmation Windows).

@@ -52,6 +52,8 @@ Usage : screenctl serve [--usb] [--iface ncm0] [--port 8099] [--dir /data/local/
         screenctl usb-off           remet la prise USB en mode normal
 
   --usb     passe la prise USB en carte réseau (NCM) et la réarme si on rebranche
+  --dim     éteint l'écran du téléphone pendant le pilotage (l'image continue
+            d'arriver au PC) et le garde éveillé ; tout est rétabli en fin de session
   --listen  ADR:PORT fixe (tests) au lieu de suivre l'interface";
 
 fn main() -> ExitCode {
@@ -91,6 +93,7 @@ fn main() -> ExitCode {
 
 fn serve(args: &[String], dir: PathBuf) -> io::Result<()> {
     let usb = args.iter().any(|a| a == "--usb");
+    let dim = args.iter().any(|a| a == "--dim");
     let iface = opt(args, "--iface").or_else(|| usb.then(|| "ncm0".into()));
     let port: u16 = opt(args, "--port").and_then(|p| p.parse().ok()).unwrap_or(DEFAULT_PORT);
     let fixed: Option<SocketAddr> = match opt(args, "--listen") {
@@ -102,7 +105,7 @@ fn serve(args: &[String], dir: PathBuf) -> io::Result<()> {
     }
     let _ = fs::create_dir_all(&dir);
     let log = Arc::new(Mutex::new(Logger::open(&dir.join("screenctl.log"))));
-    let ctx = Ctx { dir, log };
+    let ctx = Ctx { dir, log, dim };
     ctx.log(&format!("start iface={} usb={usb}", iface.as_deref().unwrap_or("-")));
     leave_app_cgroup();
 
@@ -196,6 +199,7 @@ fn wait_link(iface: &str, usb: bool) -> Ipv4Addr {
 struct Ctx {
     dir: PathBuf,
     log: Arc<Mutex<Logger>>,
+    dim: bool,
 }
 
 impl Ctx {
@@ -278,6 +282,7 @@ impl Ctx {
         let out: Out = Arc::new(Mutex::new(first));
         self.log(&format!("stream {peer} {w}x{h} h264 {bitrate} bit/s"));
         let helper = Helper::start(out.clone(), self.log.clone());
+        let dimmer = if self.dim { Dimmer::start(self.log.clone()) } else { None };
 
         let mut touch = uinput::Touch::new(w, h).map_err(|e| self.log(&format!("uinput tactile : {e}"))).ok();
         let mut kbd = uinput::Keyboard::new().map_err(|e| self.log(&format!("uinput clavier : {e}"))).ok();
@@ -380,6 +385,7 @@ impl Ctx {
         drop(touch);
         drop(kbd);
         helper.stop();
+        drop(dimmer);
         let why = if video.is_finished() {
             video.join().unwrap_or_else(|_| "fil vidéo en erreur".into())
         } else {
@@ -592,6 +598,82 @@ impl Helper {
             let _ = c.wait();
         }
     }
+}
+
+/// Écran éteint pendant le pilotage : rétroéclairage à 0 (la composition continue,
+/// le PC reçoit toujours l'image) et écran gardé éveillé. C'est l'écran qui
+/// consomme le plus : moins de décharge quand le port USB du PC alimente peu.
+/// La luminosité automatique peut réécrire la valeur : on la remet à 0 toutes
+/// les 0,5 s. À la fin de la session, valeurs d'origine restaurées.
+struct Dimmer {
+    stop: Arc<AtomicBool>,
+    thread: Option<thread::JoinHandle<()>>,
+    path: PathBuf,
+    saved: String,
+    stay_on: String,
+}
+
+impl Dimmer {
+    fn start(log: Arc<Mutex<Logger>>) -> Option<Dimmer> {
+        let logl = |m: &str| log.lock().unwrap_or_else(|p| p.into_inner()).line(m);
+        let path = fs::read_dir("/sys/class/backlight")
+            .ok()?
+            .filter_map(Result::ok)
+            .map(|e| e.path().join("brightness"))
+            .find(|p| p.exists());
+        let Some(path) = path else {
+            logl("écran éteint : rétroéclairage introuvable");
+            return None;
+        };
+        let saved = fs::read_to_string(&path).unwrap_or_default().trim().to_string();
+        let stay_on = setting_get("stay_on_while_plugged_in");
+        // 7 = rester allumé sur secteur + USB + sans fil, le temps de la session.
+        setting_put("stay_on_while_plugged_in", "7");
+        let stop = Arc::new(AtomicBool::new(false));
+        let (st, p) = (stop.clone(), path.clone());
+        let thread = thread::spawn(move || {
+            while !st.load(Ordering::SeqCst) {
+                let _ = fs::write(&p, "0");
+                thread::sleep(Duration::from_millis(500));
+            }
+        });
+        logl(&format!("écran du téléphone éteint pendant la session ({})", path.display()));
+        Some(Dimmer { stop, thread: Some(thread), path, saved, stay_on })
+    }
+}
+
+impl Drop for Dimmer {
+    fn drop(&mut self) {
+        self.stop.store(true, Ordering::SeqCst);
+        if let Some(t) = self.thread.take() {
+            let _ = t.join();
+        }
+        if !self.saved.is_empty() {
+            let _ = fs::write(&self.path, &self.saved);
+        }
+        setting_put("stay_on_while_plugged_in", if self.stay_on.is_empty() { "0" } else { &self.stay_on });
+    }
+}
+
+fn setting_get(key: &str) -> String {
+    Command::new("settings")
+        .args(["get", "global", key])
+        .stdin(Stdio::null())
+        .stderr(Stdio::null())
+        .output()
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+        .ok()
+        .filter(|v| v.parse::<u32>().is_ok())
+        .unwrap_or_default()
+}
+
+fn setting_put(key: &str, val: &str) {
+    let _ = Command::new("settings")
+        .args(["put", "global", key, val])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status();
 }
 
 /// .../com.jbr.purpleops-XXX/lib/arm64/libscreenctl.so -> .../base.apk
