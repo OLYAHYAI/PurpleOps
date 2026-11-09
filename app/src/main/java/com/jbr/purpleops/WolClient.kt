@@ -23,14 +23,20 @@ import java.security.MessageDigest
  * même les trois nœuds éteints.
  *
  * Sécurité : clé du téléphone dans le Keystore ([WolKey]) ; clé d'hôte du Pi
- * ÉPINGLÉE (ed25519), validée une fois par l'utilisateur dans Réglages.
+ * ÉPINGLÉE, validée une fois par l'utilisateur dans Réglages.
+ *
+ * Clé d'hôte ECDSA P-256 et non ed25519 : sur Android, JSch ne peut pas
+ * vérifier ed25519 (classes EdDSA de Java 15 absentes, Bouncy Castle requis) ;
+ * la négociation échouait avant même l'envoi de la clé (v35). P-256 est vérifiée
+ * par le fournisseur EC d'Android, comme la clé du téléphone elle-même.
  */
 object WolClient {
 
     const val DEFAULT_HOST = "100.117.55.112"   // wol-pi (Tailscale)
     const val USER = "wol"
     const val P_HOST = "wol_host"
-    const val P_HOSTKEY = "wol_hostkey"           // base64 du blob ed25519 épinglé
+    const val P_HOSTKEY = "wol_hostkey"           // base64 du blob de clé d'hôte épinglé
+    const val HOSTKEY_ALG = "ecdsa-sha2-nistp256"
     val TARGETS = listOf("f4blox", "pve", "proxmox") // ordre de « Tout allumer » : le SOC d'abord
     private val RESULTS = setOf("sent", "already_up", "no_link", "error", "rejected")
 
@@ -80,7 +86,7 @@ object WolClient {
         jsch.addIdentity(WolKey.KeystoreIdentity(), null)
         return jsch.getSession(USER, host, 22).apply {
             setConfig("StrictHostKeyChecking", "yes")
-            setConfig("server_host_key", "ssh-ed25519")
+            setConfig("server_host_key", HOSTKEY_ALG)
             setConfig("PreferredAuthentications", "publickey")
             setConfig("PubkeyAcceptedAlgorithms", "ecdsa-sha2-nistp256")
             timeout = 12_000
@@ -96,8 +102,10 @@ object WolClient {
         WolKey.ensure()
         val repo = PinnedRepo(null)
         val s = newSession(host(ctx), repo)
-        try { s.connect(12_000) } catch (e: Exception) { /* attendu : clé non épinglée */ } finally { s.disconnect() }
-        val key = repo.seenKey ?: throw IllegalStateException("wol-pi injoignable en SSH (${host(ctx)}:22)")
+        var err: Exception? = null
+        try { s.connect(12_000) } catch (e: Exception) { err = e /* attendu : clé non épinglée */ } finally { s.disconnect() }
+        val key = repo.seenKey ?: throw IllegalStateException(
+            "pas de clé d'hôte reçue de ${host(ctx)}:22 (${err?.javaClass?.simpleName}: ${err?.message?.take(120)})")
         Triple(repo.seenType ?: "?", Base64.encodeToString(key, Base64.NO_WRAP), sshFingerprint(key))
     }
 

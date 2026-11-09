@@ -16,7 +16,7 @@ import kotlinx.coroutines.launch
  *
  * Appairage en deux temps, sans rien faire confiance implicitement :
  *  1. lecture de la clé d'hôte ed25519 du Pi, affichée avec son empreinte à
- *     comparer à `ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub` (sur le Pi) ;
+ *     comparer à `ssh-keygen -lf /etc/ssh/ssh_host_ecdsa_key.pub` (sur le Pi) ;
  *  2. génération de la clé du téléphone (Keystore) et affichage de la ligne
  *     `authorized_keys` à coller dans /home/wol/.ssh/authorized_keys.
  */
@@ -54,10 +54,10 @@ class WolPanel(private val act: AppCompatActivity, root: View, private val ui: C
                 status.text = "Échec : ${e.message}"; return@launch
             }
             val (type, b64, fp) = probe
-            if (type != "ssh-ed25519") { status.text = "Clé d'hôte inattendue ($type) : refus."; return@launch }
+            if (type != WolClient.HOSTKEY_ALG) { status.text = "Clé d'hôte inattendue ($type) : refus."; return@launch }
             AlertDialog.Builder(act)
                 .setTitle("Clé d'hôte de wol-pi")
-                .setMessage("$type\n$fp\n\nCompare avec, sur le Pi :\nssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub\n\nNe fais confiance que si l'empreinte est identique.")
+                .setMessage("$type\n$fp\n\nCompare avec, sur le Pi :\nssh-keygen -lf /etc/ssh/ssh_host_ecdsa_key.pub\n\nNe fais confiance que si l'empreinte est identique.")
                 .setPositiveButton("Faire confiance") { _, _ ->
                     WolClient.pin(ctx, b64)
                     showKeyLine()
