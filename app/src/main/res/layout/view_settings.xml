@@ -62,6 +62,28 @@
             android:text="Démarrer automatiquement à l'ouverture de PurpleOps" android:textColor="@color/text"
             android:textSize="13sp" android:buttonTint="@color/neon" android:paddingBottom="10dp" />
 
+        <!-- Réveil des nœuds par wol-pi (Wake-on-LAN), v35 -->
+        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Réveil des nœuds (wol-pi)"
+            android:textColor="@color/neon" android:textSize="13sp" android:paddingTop="18dp" android:paddingBottom="4dp" />
+        <TextView android:id="@+id/wolStatus" android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:text="—" android:textColor="@color/muted" android:textSize="12sp" />
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:orientation="horizontal" android:paddingTop="8dp">
+            <TextView android:id="@+id/wolPair" android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content"
+                android:background="@drawable/btn_neon" android:gravity="center" android:padding="10dp" android:layout_marginEnd="8dp"
+                android:text="APPAIRER" android:textColor="@color/neon" android:textSize="12sp" />
+            <TextView android:id="@+id/wolTest" android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content"
+                android:background="@drawable/btn_neon" android:gravity="center" android:padding="10dp" android:layout_marginEnd="8dp"
+                android:text="TESTER" android:textColor="@color/neon" android:textSize="12sp" />
+            <TextView android:id="@+id/wolForget" android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content"
+                android:background="@drawable/btn_neon" android:gravity="center" android:padding="10dp"
+                android:text="OUBLIER" android:textColor="@color/danger" android:textSize="12sp" />
+        </LinearLayout>
+        <TextView android:id="@+id/wolKeyLine" android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:text="" android:textColor="@color/console_text" android:textSize="11sp" android:fontFamily="monospace"
+            android:background="@drawable/bg_console" android:padding="10dp" android:layout_marginTop="8dp"
+            android:textIsSelectable="true" android:visibility="gone" />
+
         <TextView android:id="@+id/cfgVersion" android:layout_width="wrap_content" android:layout_height="wrap_content"
             android:text="" android:textColor="@color/muted" android:textSize="11sp" android:paddingTop="18dp" />
         <TextView android:id="@+id/cfgCheckUpdate" android:layout_width="wrap_content" android:layout_height="wrap_content"

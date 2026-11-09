@@ -68,6 +68,11 @@ android {
             useLegacyPackaging = true
             keepDebugSymbols += "**/libp900ctl.so"
         }
+        // JSch est un JAR multi-release (classes Java 9+ sous META-INF/versions) :
+        // Android n'en a pas l'usage.
+        resources {
+            excludes += "META-INF/versions/**"
+        }
     }
 
     buildFeatures {
@@ -88,4 +93,7 @@ dependencies {
     implementation("androidx.appcompat:appcompat:1.7.0")
     implementation("com.google.android.material:material:1.12.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
+    // Client SSH pour le réveil des nœuds via wol-pi (fork maintenu de JSch, BSD,
+    // sans dépendance). La clé privée reste dans l'Android Keystore (WolKey).
+    implementation("com.github.mwiede:jsch:2.28.8")
 }
