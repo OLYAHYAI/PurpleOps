@@ -41,6 +41,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var viewScreen: View
     private var camera: CameraPanel? = null
     private var screen: ScreenPanel? = null
+    private var home: HomePanel? = null
     private lateinit var bottomNav: BottomNavigationView
     private var currentTab = R.id.nav_home
 
@@ -96,6 +97,8 @@ class MainActivity : AppCompatActivity() {
         camera = try { CameraPanel(this, viewCamera, ui) } catch (e: Exception) { null }
         screen = try { ScreenPanel(this, viewScreen, ui) } catch (e: Exception) { null }
         try { McpPanel(this, viewSettings, ui) } catch (e: Exception) { }
+        try { WolPanel(this, viewSettings, ui) } catch (e: Exception) { }
+        home = try { HomePanel(this, viewHome, ui) { id -> bottomNav.selectedItemId = id } } catch (e: Exception) { null }
 
         bindKali()
         bindSettings()
@@ -118,7 +121,8 @@ class MainActivity : AppCompatActivity() {
         viewCamera.visibility = if (id == R.id.nav_camera) View.VISIBLE else View.GONE
         viewScreen.visibility = if (id == R.id.nav_screen) View.VISIBLE else View.GONE
         if (id == R.id.nav_screen) screen?.refreshPcs()
-        if (id == R.id.nav_home || id == R.id.nav_alerts || id == R.id.nav_assets) refreshDashboard()
+        home?.setVisible(id == R.id.nav_home)
+        if (id == R.id.nav_alerts || id == R.id.nav_assets) refreshDashboard()
     }
 
     // ---------------- KALI ----------------
@@ -290,74 +294,28 @@ class MainActivity : AppCompatActivity() {
     private fun refreshDashboard() {
         if (dashLoading) return
         dashLoading = true
-        findViewById<TextView>(R.id.homeStatusSub).text = "Chargement Wazuh…"
         ui.launch {
             val res = WazuhClient.load(applicationContext)
             dashLoading = false
+            val allAlerts = findViewById<LinearLayout>(R.id.alertsList).also { it.removeAllViews() }
+            val allAssets = findViewById<LinearLayout>(R.id.assetsList).also { it.removeAllViews() }
             when (res) {
-                is WzResult.NotConfigured -> showDemo("Non configuré — onglet Réglages")
-                is WzResult.Err -> showDemo("Wazuh injoignable : ${res.message}")
-                is WzResult.Ok -> showLive(res.summary)
+                is WzResult.NotConfigured -> { addInfo(allAlerts, "Non configuré — onglet Réglages"); addInfo(allAssets, "Non configuré — onglet Réglages") }
+                is WzResult.Err -> { addInfo(allAlerts, "Wazuh injoignable : ${res.message}"); addInfo(allAssets, "Wazuh injoignable : ${res.message}") }
+                is WzResult.Ok -> {
+                    val s = res.summary
+                    if (s.alerts.isEmpty()) addInfo(allAlerts, "Aucune alerte sur 24h")
+                    for (a in s.alerts) {
+                        val dot = if (a.level >= 10) "#FF4D5E" else if (a.level >= 7) "#F5A524" else "#4DA3FF"
+                        addListItem(allAlerts, dot, a.desc, "${a.agent} · niveau ${a.level}")
+                    }
+                    for (ag in s.agents) {
+                        val dot = if (ag.status.equals("active", true)) "#2ECC71" else "#FF4D5E"
+                        addListItem(allAssets, dot, ag.name, "${ag.status} · ${ag.ip}")
+                    }
+                }
             }
         }
-    }
-
-    private fun colorFor(label: String) = when (label) {
-        "Protégé" -> "#5CFFA6"; "Attention" -> "#FFB454"; else -> "#FF5C7A"
-    }
-
-    private fun showLive(s: WzSummary) {
-        findViewById<TextView>(R.id.demoTag).visibility = View.GONE
-        val col = colorFor(s.statusLabel)
-        findViewById<TextView>(R.id.homeStatus).apply { text = s.statusLabel; setTextColor(Color.parseColor(col)) }
-        findViewById<TextView>(R.id.homeStatusSub).text = "Mis à jour à l'instant"
-        findViewById<TextView>(R.id.homeScore).apply { text = s.score.toString(); setTextColor(Color.parseColor(col)) }
-        findViewById<TextView>(R.id.statAgents).text = s.total.toString()
-        findViewById<TextView>(R.id.statAlerts).text = s.alerts24h.toString()
-        val pct = if (s.total > 0) s.active * 100 / s.total else 0
-        findViewById<TextView>(R.id.statUptime).text = "$pct%"
-
-        val homeAlerts = findViewById<LinearLayout>(R.id.homeAlerts).also { it.removeAllViews() }
-        val allAlerts = findViewById<LinearLayout>(R.id.alertsList).also { it.removeAllViews() }
-        if (s.alerts.isEmpty()) addInfo(homeAlerts, "Aucune alerte sur 24h")
-        for ((i, a) in s.alerts.withIndex()) {
-            val dot = if (a.level >= 10) "#FF5C7A" else if (a.level >= 7) "#FFB454" else "#5CF2FF"
-            val sub = "${a.agent} · niveau ${a.level}"
-            addListItem(homeAlerts, dot, a.desc, sub)
-            addListItem(allAlerts, dot, a.desc, sub)
-        }
-
-        val homeAssets = findViewById<LinearLayout>(R.id.homeAssets).also { it.removeAllViews() }
-        val allAssets = findViewById<LinearLayout>(R.id.assetsList).also { it.removeAllViews() }
-        if (s.agents.isEmpty()) addInfo(homeAssets, "Aucun agent")
-        for ((i, ag) in s.agents.withIndex()) {
-            val dot = if (ag.status.equals("active", true)) "#5CFFA6" else "#FF5C7A"
-            val sub = "${ag.status} · ${ag.ip}"
-            if (i < 6) addListItem(homeAssets, dot, ag.name, sub)
-            addListItem(allAssets, dot, ag.name, sub)
-        }
-    }
-
-    private fun showDemo(reason: String) {
-        findViewById<TextView>(R.id.demoTag).visibility = View.VISIBLE
-        findViewById<TextView>(R.id.homeStatus).apply { text = "Protégé"; setTextColor(Color.parseColor("#EDE9F5")) }
-        findViewById<TextView>(R.id.homeStatusSub).text = reason
-        findViewById<TextView>(R.id.homeScore).apply { text = "92"; setTextColor(Color.parseColor("#B388FF")) }
-        findViewById<TextView>(R.id.statAgents).text = "6"
-        findViewById<TextView>(R.id.statAlerts).text = "2"
-        findViewById<TextView>(R.id.statUptime).text = "99%"
-        val ha = findViewById<LinearLayout>(R.id.homeAlerts).also { it.removeAllViews() }
-        addListItem(ha, "#FF5C7A", "Connexion inhabituelle", "demo")
-        addListItem(ha, "#FFB454", "Certificat SSL expire bientot", "demo")
-        val aa = findViewById<LinearLayout>(R.id.alertsList).also { it.removeAllViews() }
-        addListItem(aa, "#FF5C7A", "Connexion inhabituelle", "demo")
-        addListItem(aa, "#FFB454", "Certificat SSL expire bientot", "demo")
-        val hs = findViewById<LinearLayout>(R.id.homeAssets).also { it.removeAllViews() }
-        addListItem(hs, "#5CFFA6", "Serveur de production", "demo")
-        addListItem(hs, "#FFB454", "Point d'acces Wi-Fi", "demo")
-        val az = findViewById<LinearLayout>(R.id.assetsList).also { it.removeAllViews() }
-        addListItem(az, "#5CFFA6", "Serveur de production", "demo")
-        addListItem(az, "#FFB454", "Point d'acces Wi-Fi", "demo")
     }
 
     private fun addInfo(parent: LinearLayout, text: String) {
@@ -498,6 +456,16 @@ class MainActivity : AppCompatActivity() {
         ) {
             ActivityCompat.requestPermissions(this, arrayOf(Manifest.permission.POST_NOTIFICATIONS), 1)
         }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        home?.setVisible(currentTab == R.id.nav_home)
+    }
+
+    override fun onPause() {
+        home?.setVisible(false)   // pas de rafraîchissement en arrière-plan
+        super.onPause()
     }
 
     override fun onDestroy() {
