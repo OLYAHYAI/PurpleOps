@@ -19,16 +19,21 @@ permissions:
 jobs:
   pr-check:
     if: github.event_name == 'pull_request'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@77dd5b2ce225ea11469928ac317850245a74ae78 # v6.2.0
         with:
           distribution: temurin
           java-version: '17'
-      - uses: gradle/actions/setup-gradle@v4
+      # Cache « basic » = enveloppe MIT d'actions/cache (le fournisseur par défaut
+      # de la v6 est propriétaire).
+      - uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
         with:
           gradle-version: '8.10.2'
+          cache-provider: basic
       - name: Rust (tests hote + build arm64)
         run: |
           rustup target add aarch64-linux-android
@@ -40,26 +45,31 @@ jobs:
 
   build:
     if: github.event_name != 'pull_request'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     # Les secrets de signature ne sont exposes qu'a ce job (environnement protege).
     environment: release
     permissions:
       contents: write   # necessaire pour publier une Release
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Set up JDK 17
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@77dd5b2ce225ea11469928ac317850245a74ae78 # v6.2.0
         with:
           distribution: temurin
           java-version: '17'
 
       # Pas de setup-android : SDK preinstalle sur ubuntu-latest.
       - name: Set up Gradle
-        uses: gradle/actions/setup-gradle@v4
+        uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
         with:
           gradle-version: '8.10.2'
+          # Job qui manipule la clé de signature : pas de cache réutilisé (un
+          # cache est une entrée non vérifiée du build signé).
+          cache-disabled: true
 
       # Module camera (Rust) : tests sur l'hote, puis binaire Android arm64
       # embarque dans l'APK comme libp900ctl.so (extrait dans nativeLibraryDir).
@@ -113,9 +123,9 @@ jobs:
           cat "$APK.sha256"
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: PurpleOps-debug-apk
+          name: PurpleOps-apk
           path: |
             PurpleOps-v${{ github.run_number }}.apk
             PurpleOps-v${{ github.run_number }}.apk.sha256
@@ -138,12 +148,14 @@ jobs:
   # Job séparé : s'il échoue, l'APK est déjà publié.
   screenview-windows:
     needs: build
-    runs-on: windows-latest
+    runs-on: windows-2025
     permissions:
       contents: write
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Build screenview.exe
         run: cargo build --release --manifest-path camera/pc-client/screenview/Cargo.toml
