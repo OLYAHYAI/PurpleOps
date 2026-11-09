@@ -137,6 +137,7 @@ export component AppWindow inherits Window {
             if root.page == 0: VerticalLayout {
                 padding: Theme.sp-4;
                 spacing: Theme.sp-3;
+                alignment: start;
                 Text { text: "PurpleOps · prototype Slint"; color: Theme.text; font-size: Theme.fs-xl; font-weight: 800; }
                 Text { text: "Go / no-go : chaque critère se teste dans son onglet."; color: Theme.muted; font-size: Theme.fs-sm; wrap: word-wrap; }
                 Card {
@@ -189,7 +190,7 @@ export component AppWindow inherits Window {
                     HorizontalLayout {
                         padding: Theme.sp-3;
                         spacing: Theme.sp-3;
-                        Rectangle { width: 10px; height: 10px; border-radius: 5px; background: Theme.ok; y: (parent.height - self.height) / 2; }
+                        VerticalLayout { alignment: center; Rectangle { width: 10px; height: 10px; border-radius: 5px; background: Theme.ok; } }
                         VerticalLayout {
                             horizontal-stretch: 1;
                             Text { text: n.name; color: Theme.text; font-size: Theme.fs-md; font-weight: 700; }

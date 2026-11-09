@@ -23,7 +23,7 @@ fn with_ui(f: impl FnOnce(AppWindow) + Send + 'static) {
 }
 
 /// 200 lignes factices façon journal d'alertes (critère 6).
-fn demo_rows() -> slint::ModelRc<slint::SharedString> {
+pub fn demo_rows() -> slint::ModelRc<slint::SharedString> {
     let rows: Vec<slint::SharedString> = (0..200)
         .map(|i| {
             format!(

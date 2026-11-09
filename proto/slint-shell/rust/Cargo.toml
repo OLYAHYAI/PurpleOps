@@ -28,3 +28,6 @@ opt-level = "s"
 lto = true
 codegen-units = 1
 strip = true
+
+[dev-dependencies]
+png = "0.17"
