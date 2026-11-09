@@ -8,7 +8,9 @@ import androidx.core.app.NotificationManagerCompat
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
+import android.content.pm.PackageManager
 import java.io.File
+import java.security.MessageDigest
 import java.net.HttpURLConnection
 import java.net.URL
 
@@ -16,8 +18,10 @@ import java.net.URL
  * Auto-update silencieuse (profite du root).
  * 1. interroge l'API GitHub Releases du repo (BuildConfig.GITHUB_REPO) ;
  * 2. compare le versionCode de la derniere release a celui installe ;
- * 3. si plus recent : telecharge l'APK, l'installe en silencieux via
- *    `su -c pm install -r`, et notifie.
+ * 3. si plus recent : telecharge l'APK et son empreinte `<apk>.sha256` publiee
+ *    par la CI, verifie l'empreinte (fail-closed : pas d'empreinte = pas
+ *    d'installation) PUIS que l'APK est signe par la meme cle que l'appli
+ *    installee, l'installe en silencieux via `su -c pm install -r`, et notifie.
  *
  * Tout est best-effort : hors-ligne ou erreur => on ne fait rien (pas de crash).
  */
@@ -26,7 +30,7 @@ object Updater {
     private const val CHANNEL_ID = "updates"
     private const val NOTIF_ID = 42
 
-    data class Release(val code: Int, val name: String, val apkUrl: String, val size: Long)
+    data class Release(val code: Int, val name: String, val apkUrl: String, val size: Long, val shaUrl: String?)
 
     // Une seule mise à jour à la fois : la vérification au démarrage et le bouton
     // « Chercher une mise à jour » écrivaient sinon le même fichier en même temps.
@@ -58,6 +62,13 @@ object Updater {
                 if (attempt < 3) kotlinx.coroutines.delay(3000)
             }
             if (apk == null) return
+            val why = verify(ctx, apk, rel)
+            if (why != null) {
+                apk.delete()
+                log("[maj] REFUS d'installer v${rel.code} : $why")
+                notify(ctx, "PurpleOps — mise a jour refusee", why)
+                return
+            }
             log("[maj] installation silencieuse (root)…")
             val (code, out) = RootRunner.runAndroidRoot(
                 "cp '${apk.absolutePath}' /data/local/tmp/po-update.apk && " +
@@ -94,17 +105,24 @@ object Updater {
             val tag = o.optString("tag_name", o.optString("name", ""))
             val code = Regex("\\d+").find(tag)?.value?.toIntOrNull() ?: return@withContext null
             val assets = o.optJSONArray("assets") ?: return@withContext null
+            var apkName: String? = null
             var apkUrl: String? = null
             var size = -1L
             for (i in 0 until assets.length()) {
                 val a = assets.getJSONObject(i)
                 if (a.optString("name").endsWith(".apk")) {
+                    apkName = a.optString("name")
                     apkUrl = a.optString("browser_download_url")
                     size = a.optLong("size", -1L)
                     break
                 }
             }
-            apkUrl?.let { Release(code, tag, it, size) }
+            var shaUrl: String? = null
+            for (i in 0 until assets.length()) {
+                val a = assets.getJSONObject(i)
+                if (apkName != null && a.optString("name") == "$apkName.sha256") shaUrl = a.optString("browser_download_url")
+            }
+            apkUrl?.let { Release(code, tag, it, size, shaUrl) }
         } finally {
             c.disconnect()
         }
@@ -141,6 +159,41 @@ object Updater {
                 c.disconnect()
             }
         }
+
+    /** null si l'APK est acceptable, sinon la raison du refus. */
+    private suspend fun verify(ctx: Context, apk: File, rel: Release): String? = withContext(Dispatchers.IO) {
+        val shaUrl = rel.shaUrl ?: return@withContext "empreinte .sha256 absente de la release"
+        val expected = try {
+            val c = (URL(shaUrl).openConnection() as HttpURLConnection).apply {
+                instanceFollowRedirects = true; connectTimeout = 15000; readTimeout = 15000
+                setRequestProperty("User-Agent", "PurpleOps-Updater")
+            }
+            try {
+                if (c.responseCode !in 200..299) return@withContext "empreinte illisible (HTTP ${c.responseCode})"
+                c.inputStream.bufferedReader().use { it.readText() }.trim().split(Regex("\\s+")).first().lowercase()
+            } finally { c.disconnect() }
+        } catch (e: Exception) { return@withContext "empreinte illisible (${e.javaClass.simpleName})" }
+        if (!Regex("^[0-9a-f]{64}$").matches(expected)) return@withContext "empreinte mal formee"
+        val md = MessageDigest.getInstance("SHA-256")
+        apk.inputStream().use { input ->
+            val buf = ByteArray(1 shl 16)
+            while (true) { val n = input.read(buf); if (n < 0) break; md.update(buf, 0, n) }
+        }
+        val actual = md.digest().joinToString("") { "%02x".format(it) }
+        if (actual != expected) return@withContext "empreinte SHA-256 differente (APK altere ou incomplet)"
+
+        // Meme cle de signature que l'appli installee ? (pm le refuserait de toute
+        // facon ; on le verifie avant pour un message clair et sans passer par root.)
+        val pm = ctx.packageManager
+        val flags = PackageManager.GET_SIGNING_CERTIFICATES
+        val mine = pm.getPackageInfo(ctx.packageName, flags).signingInfo?.apkContentsSigners
+        val theirs = pm.getPackageArchiveInfo(apk.absolutePath, flags)?.signingInfo?.apkContentsSigners
+        if (mine.isNullOrEmpty() || theirs.isNullOrEmpty()) return@withContext "signature de l'APK illisible"
+        fun fp(s: Array<android.content.pm.Signature>) =
+            s.map { MessageDigest.getInstance("SHA-256").digest(it.toByteArray()).joinToString("") { b -> "%02x".format(b) } }.toSet()
+        if (fp(mine) != fp(theirs)) return@withContext "APK signe par une autre cle que l'appli installee"
+        null
+    }
 
     private fun notify(ctx: Context, title: String, text: String) {
         try {

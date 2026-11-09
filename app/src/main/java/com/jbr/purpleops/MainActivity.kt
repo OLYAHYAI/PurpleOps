@@ -71,6 +71,8 @@ class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
+        // Secrets hérités en clair (versions <= v28) -> chiffrés par le Keystore.
+        try { SecureStore.migrate(applicationContext) } catch (e: Exception) { }
 
         val contentArea = findViewById<View>(R.id.contentArea)
         bottomNav = findViewById(R.id.bottomNav)
@@ -405,28 +407,40 @@ class MainActivity : AppCompatActivity() {
         val p = getSharedPreferences("purpleops", MODE_PRIVATE)
         host.setText(p.getString("wz_host", ""))
         apiUser.setText(p.getString("wz_api_user", ""))
-        apiPass.setText(p.getString("wz_api_pass", ""))
+        apiPass.setText(SecureStore.get(this, "wz_api_pass"))
         idxUser.setText(p.getString("wz_idx_user", ""))
-        idxPass.setText(p.getString("wz_idx_pass", ""))
+        idxPass.setText(SecureStore.get(this, "wz_idx_pass"))
         version.text = "PurpleOps v${BuildConfig.VERSION_NAME} (code ${BuildConfig.VERSION_CODE})"
 
         save.setOnClickListener {
-            p.edit()
-                .putString("wz_host", host.text.toString().trim())
+            val newHost = host.text.toString().trim()
+            val ed = p.edit()
+            // Nouvel hôte = nouvelles empreintes à valider.
+            if (newHost != p.getString("wz_host", "")) ed.remove(WazuhClient.PIN_API).remove(WazuhClient.PIN_IDX)
+            ed.putString("wz_host", newHost)
                 .putString("wz_api_user", apiUser.text.toString().trim())
-                .putString("wz_api_pass", apiPass.text.toString())
                 .putString("wz_idx_user", idxUser.text.toString().trim())
-                .putString("wz_idx_pass", idxPass.text.toString())
-                .apply()
-            status.text = "Enregistré. Le dashboard se rafraîchira."
+            SecureStore.put(ed, "wz_api_pass", apiPass.text.toString())
+            SecureStore.put(ed, "wz_idx_pass", idxPass.text.toString())
+            ed.apply()
+            status.text = "Enregistré (mots de passe chiffrés). Puis « Tester » pour valider les certificats."
             toast("Réglages enregistrés")
         }
         test.setOnClickListener {
             status.text = "Test en cours…"
             ui.launch {
+                val h = p.getString("wz_host", "").orEmpty()
+                val needPins = p.getString(WazuhClient.PIN_API, "").isNullOrEmpty() ||
+                    (p.getString("wz_idx_user", "").orEmpty().isNotEmpty() && p.getString(WazuhClient.PIN_IDX, "").isNullOrEmpty())
+                if (h.isNotEmpty() && needPins) {
+                    if (!confirmPins(h)) { status.text = "Empreintes non validées : connexion refusée."; return@launch }
+                }
                 when (val res = WazuhClient.load(applicationContext)) {
                     is WzResult.NotConfigured -> status.text = "Renseigne au moins l'hôte + identifiants API, puis Enregistrer."
-                    is WzResult.Err -> status.text = "Échec : ${res.message}"
+                    is WzResult.Err -> {
+                        status.text = "Échec : ${res.message}"
+                        if (res.message.contains("CHANGÉ") && confirmPins(h)) status.append("\nNouvelles empreintes enregistrées : relance « Tester ».")
+                    }
                     is WzResult.Ok -> status.text = "OK — ${res.summary.total} agents (${res.summary.active} actifs), ${res.summary.alerts24h} alertes/24h."
                 }
             }
@@ -434,6 +448,44 @@ class MainActivity : AppCompatActivity() {
         checkUpdate.setOnClickListener {
             status.text = "Recherche de mise a jour…"
             ui.launch { Updater.checkAndUpdate(applicationContext) { line -> status.append("\n$line") } }
+        }
+    }
+
+    /**
+     * Lit les clés publiques présentées par l'API (55000) et l'Indexer (9200),
+     * affiche leurs empreintes SPKI SHA-256 et ne les enregistre qu'après accord
+     * explicite. À comparer avec, sur le manager :
+     *   openssl s_client -connect 127.0.0.1:55000 </dev/null | openssl x509 -pubkey -noout \
+     *     | openssl pkey -pubin -outform der | openssl dgst -sha256 -binary | base64
+     */
+    private suspend fun confirmPins(host: String): Boolean {
+        val probes = withContext(Dispatchers.IO) {
+            listOf(WazuhClient.API_PORT, WazuhClient.IDX_PORT).associateWith { port ->
+                try { PinnedTls.probe(host, port) } catch (e: Exception) { null }
+            }
+        }
+        val api = probes[WazuhClient.API_PORT] ?: run { toast("API $host:55000 injoignable"); return false }
+        val idx = probes[WazuhClient.IDX_PORT]
+        val msg = buildString {
+            append("Vérifie ces empreintes (SPKI SHA-256) sur le manager avant d'accepter.\n\n")
+            append("API 55000\n${api.first}\n\n")
+            append(if (idx != null) "Indexer 9200\n${idx.first}" else "Indexer 9200 : injoignable (non épinglé)")
+        }
+        return kotlinx.coroutines.suspendCancellableCoroutine { cont ->
+            val d = AlertDialog.Builder(this)
+                .setTitle("Certificats de $host")
+                .setMessage(msg)
+                .setPositiveButton("Faire confiance") { _, _ ->
+                    val ed = getSharedPreferences("purpleops", MODE_PRIVATE).edit().putString(WazuhClient.PIN_API, api.first)
+                    if (idx != null) ed.putString(WazuhClient.PIN_IDX, idx.first)
+                    ed.apply()
+                    if (cont.isActive) cont.resumeWith(Result.success(true))
+                }
+                .setNegativeButton("Refuser") { _, _ -> if (cont.isActive) cont.resumeWith(Result.success(false)) }
+                .setOnCancelListener { if (cont.isActive) cont.resumeWith(Result.success(false)) }
+                .show()
+            d.findViewById<TextView>(android.R.id.message)?.setTextIsSelectable(true)
+            cont.invokeOnCancellation { d.dismiss() }
         }
     }
 
