@@ -22,26 +22,38 @@ android {
         buildConfigField("String", "GITHUB_REPO", "\"OLYAHYAI/PurpleOps\"")
     }
 
-    // Cle debug FIXE commitee : toutes les builds (local + CI) sont signees pareil,
-    // donc une mise a jour s'installe par-dessus la precedente (pm install -r).
-    // Note securite : cle debug (mdp "android"), convient a un outil homelab ; a
-    // regenerer si l'app sort du labo.
+    // Signature : cle de RELEASE privee, jamais dans le depot. La CI la fournit
+    // par variables d'environnement (secrets GitHub) :
+    //   PO_KEYSTORE (chemin du .jks decode), PO_KEYSTORE_PASS, PO_KEY_ALIAS, PO_KEY_PASS.
+    // Pourquoi : sur Android, une mise a jour signee par la meme cle herite de
+    // l'UID de l'appli, donc de ses cles Keystore (secrets, future cle
+    // d'extinction). L'ancienne cle debug etait publique (commitee, mdp
+    // "android") : elle ne protegeait plus rien. Sans ces variables (build
+    // local), le type release n'est pas signe et la CI echoue volontairement.
+    val ksPath = System.getenv("PO_KEYSTORE")
     signingConfigs {
-        getByName("debug") {
-            storeFile = file("debug.keystore")
-            storePassword = "android"
-            keyAlias = "androiddebugkey"
-            keyPassword = "android"
+        if (!ksPath.isNullOrBlank()) {
+            create("release") {
+                storeFile = file(ksPath)
+                storePassword = System.getenv("PO_KEYSTORE_PASS")
+                keyAlias = System.getenv("PO_KEY_ALIAS")
+                keyPassword = System.getenv("PO_KEY_PASS")
+                enableV1Signing = false
+                enableV2Signing = true
+                enableV3Signing = true
+            }
         }
     }
 
     buildTypes {
-        getByName("debug") {
-            signingConfig = signingConfigs.getByName("debug")
-        }
+        // debug = builds locales et verification des PR (cle debug propre a la
+        // machine, generee par Gradle) ; jamais publie.
         release {
+            // Pas de minification : l'aide Java ScreenHelper est lancee par
+            // app_process via son nom de classe.
             isMinifyEnabled = false
-            signingConfig = signingConfigs.getByName("debug")
+            isDebuggable = false
+            if (!ksPath.isNullOrBlank()) signingConfig = signingConfigs.getByName("release")
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"

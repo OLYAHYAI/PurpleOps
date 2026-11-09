@@ -6,14 +6,45 @@ on:
     # Un commit qui ne touche QUE le serveur MCP ne doit pas rebuild/réinstaller l'APK.
     paths-ignore:
       - 'mcp-server/**'
+  # Verification des PR : compile tout (Rust + APK release NON signe), ne publie
+  # rien et n'a acces a aucun secret.
+  pull_request:
+    paths-ignore:
+      - 'mcp-server/**'
   workflow_dispatch:
 
 permissions:
-  contents: write   # necessaire pour publier une Release
+  contents: read
 
 jobs:
-  build:
+  pr-check:
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.10.2'
+      - name: Rust (tests hote + build arm64)
+        run: |
+          rustup target add aarch64-linux-android
+          cargo test --manifest-path camera/Cargo.toml --quiet
+          export CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER="$ANDROID_NDK_LATEST_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android33-clang"
+          cargo build --manifest-path camera/Cargo.toml --release -p p900ctl -p screenctl --target aarch64-linux-android
+      - name: APK release non signe (compilation + lint vital)
+        run: gradle assembleRelease --no-daemon --stacktrace
+
+  build:
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    # Les secrets de signature ne sont exposes qu'a ce job (environnement protege).
+    environment: release
+    permissions:
+      contents: write   # necessaire pour publier une Release
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -48,21 +79,46 @@ jobs:
           cargo build --manifest-path camera/Cargo.toml --release -p screenctl --target aarch64-linux-android
           cp camera/target/aarch64-linux-android/release/screenctl app/src/main/jniLibs/arm64-v8a/libscreenctl.so
 
+      # Cle de release : secret base64 decode hors du depot, efface en fin de job.
+      # Echec volontaire si le secret manque : on ne publie JAMAIS un APK signe
+      # par une autre cle (il casserait la mise a jour des telephones).
+      - name: Decode release keystore
+        env:
+          PO_KEYSTORE_B64: ${{ secrets.PO_KEYSTORE_B64 }}
+        run: |
+          test -n "$PO_KEYSTORE_B64" || { echo "::error::secret PO_KEYSTORE_B64 absent"; exit 1; }
+          echo "$PO_KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/release.jks"
+          echo "PO_KEYSTORE=$RUNNER_TEMP/release.jks" >> "$GITHUB_ENV"
+
       # versionCode = numero de build (monotone) ; versionName = 0.1.<build>.
-      - name: Build debug APK
+      - name: Build release APK (signe)
+        env:
+          PO_KEYSTORE_PASS: ${{ secrets.PO_KEYSTORE_PASS }}
+          PO_KEY_ALIAS: ${{ secrets.PO_KEY_ALIAS }}
+          PO_KEY_PASS: ${{ secrets.PO_KEY_PASS }}
         run: >
-          gradle assembleDebug --no-daemon --stacktrace
+          gradle assembleRelease --no-daemon --stacktrace
           -PverCode=${{ github.run_number }}
           -PverName=0.1.${{ github.run_number }}
 
-      - name: Rename APK
-        run: cp app/build/outputs/apk/debug/app-debug.apk PurpleOps-v${{ github.run_number }}.apk
+      - name: Verify signer + SHA-256
+        run: |
+          rm -f "$RUNNER_TEMP/release.jks"
+          APK=PurpleOps-v${{ github.run_number }}.apk
+          cp app/build/outputs/apk/release/app-release.apk "$APK"
+          BT=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)
+          "$BT/apksigner" verify --print-certs "$APK" | tee signer.txt
+          if grep -qi "CN=Android Debug" signer.txt; then echo "::error::APK signe par une cle debug"; exit 1; fi
+          sha256sum "$APK" > "$APK.sha256"
+          cat "$APK.sha256"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: PurpleOps-debug-apk
-          path: PurpleOps-v${{ github.run_number }}.apk
+          path: |
+            PurpleOps-v${{ github.run_number }}.apk
+            PurpleOps-v${{ github.run_number }}.apk.sha256
           if-no-files-found: error
 
       # Publie une Release : c'est ce que l'app interroge pour l'auto-update.
@@ -72,6 +128,7 @@ jobs:
         run: >
           gh release create "v${{ github.run_number }}"
           "PurpleOps-v${{ github.run_number }}.apk"
+          "PurpleOps-v${{ github.run_number }}.apk.sha256"
           -R "${{ github.repository }}"
           -t "v${{ github.run_number }}"
           -n "Build automatique — ${{ github.sha }}"
@@ -82,6 +139,8 @@ jobs:
   screenview-windows:
     needs: build
     runs-on: windows-latest
+    permissions:
+      contents: write
     steps:
       - name: Checkout
         uses: actions/checkout@v4

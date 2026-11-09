@@ -8,9 +8,6 @@ import org.json.JSONObject
 import java.net.HttpURLConnection
 import java.net.URL
 import javax.net.ssl.HttpsURLConnection
-import javax.net.ssl.SSLContext
-import javax.net.ssl.TrustManager
-import javax.net.ssl.X509TrustManager
 
 /** Agent Wazuh (API manager). */
 data class WzAgent(val id: String, val name: String, val ip: String, val status: String, val lastKeepAlive: String)
@@ -33,44 +30,37 @@ sealed class WzResult {
 
 /**
  * Client Wazuh : API manager (port 55000, JWT) + Indexer (port 9200, Basic).
- * Joignable via Tailscale. Les certificats sont self-signed → on fait confiance
- * à tout certificat (acceptable car flux Tailscale homelab uniquement ; ne PAS
- * réutiliser tel quel hors de ce contexte).
+ * Joignable via Tailscale. Certificats auto-signés : chaque port est vérifié par
+ * épinglage de sa clé publique ([PinnedTls]), validée une fois dans Réglages.
+ * Les mots de passe sont lus via [SecureStore] (chiffrés par le Keystore).
  */
 object WazuhClient {
 
-    private const val API_PORT = 55000
-    private const val IDX_PORT = 9200
+    const val API_PORT = 55000
+    const val IDX_PORT = 9200
+    const val PIN_API = "wz_pin_api"
+    const val PIN_IDX = "wz_pin_idx"
 
-    private data class Cfg(val host: String, val apiUser: String, val apiPass: String, val idxUser: String, val idxPass: String)
+    private data class Cfg(
+        val host: String, val apiUser: String, val apiPass: String,
+        val idxUser: String, val idxPass: String,
+        val pinApi: String, val pinIdx: String
+    )
 
     private fun cfg(ctx: Context): Cfg? {
         val p = ctx.getSharedPreferences("purpleops", Context.MODE_PRIVATE)
         val host = p.getString("wz_host", "")?.trim().orEmpty()
         val au = p.getString("wz_api_user", "").orEmpty()
-        val ap = p.getString("wz_api_pass", "").orEmpty()
+        val ap = SecureStore.get(ctx, "wz_api_pass")
         val iu = p.getString("wz_idx_user", "").orEmpty()
-        val ip = p.getString("wz_idx_pass", "").orEmpty()
+        val ip = SecureStore.get(ctx, "wz_idx_pass")
         if (host.isEmpty() || au.isEmpty() || ap.isEmpty()) return null
-        return Cfg(host, au, ap, iu, ip)
+        return Cfg(host, au, ap, iu, ip, p.getString(PIN_API, "").orEmpty(), p.getString(PIN_IDX, "").orEmpty())
     }
 
-    // SSLContext qui fait confiance à tout (self-signed Tailscale).
-    private val trustAll: SSLContext by lazy {
-        val tm = arrayOf<TrustManager>(object : X509TrustManager {
-            override fun checkClientTrusted(c: Array<out java.security.cert.X509Certificate>?, a: String?) {}
-            override fun checkServerTrusted(c: Array<out java.security.cert.X509Certificate>?, a: String?) {}
-            override fun getAcceptedIssuers(): Array<java.security.cert.X509Certificate> = arrayOf()
-        })
-        SSLContext.getInstance("TLS").apply { init(null, tm, java.security.SecureRandom()) }
-    }
-
-    private fun open(urlStr: String): HttpURLConnection {
+    private fun open(urlStr: String, pin: String): HttpURLConnection {
         val c = URL(urlStr).openConnection() as HttpURLConnection
-        if (c is HttpsURLConnection) {
-            c.sslSocketFactory = trustAll.socketFactory
-            c.setHostnameVerifier { _, _ -> true }
-        }
+        if (c is HttpsURLConnection) PinnedTls.apply(c, pin)
         c.connectTimeout = 8000
         c.readTimeout = 15000
         return c
@@ -81,6 +71,7 @@ object WazuhClient {
 
     suspend fun load(ctx: Context): WzResult = withContext(Dispatchers.IO) {
         val cfg = cfg(ctx) ?: return@withContext WzResult.NotConfigured
+        if (cfg.pinApi.isEmpty()) return@withContext WzResult.Err("empreinte TLS de l'API non validée — Réglages › Tester")
         try {
             val token = authenticate(cfg) ?: return@withContext WzResult.Err("Auth API échouée (identifiants/port 55000 ?)")
             val agents = getAgents(cfg, token)
@@ -99,12 +90,14 @@ object WazuhClient {
             }
             WzResult.Ok(WzSummary(total, active, disc, alerts.size, score, label, agents, alerts))
         } catch (e: Exception) {
-            WzResult.Err(e.message ?: "erreur réseau")
+            val mismatch = generateSequence<Throwable>(e) { it.cause }.firstOrNull { it is PinnedTls.PinMismatch }
+            if (mismatch != null) WzResult.Err("certificat de l'API CHANGÉ — revalider l'empreinte dans Réglages")
+            else WzResult.Err(e.message ?: "erreur réseau")
         }
     }
 
     private fun authenticate(cfg: Cfg): String? {
-        val c = open("https://${cfg.host}:$API_PORT/security/user/authenticate?raw=true")
+        val c = open("https://${cfg.host}:$API_PORT/security/user/authenticate?raw=true", cfg.pinApi)
         c.requestMethod = "POST"
         c.setRequestProperty("Authorization", basic(cfg.apiUser, cfg.apiPass))
         return try {
@@ -114,7 +107,7 @@ object WazuhClient {
 
     private fun getAgents(cfg: Cfg, token: String): List<WzAgent> {
         val url = "https://${cfg.host}:$API_PORT/agents?limit=500&select=id,name,ip,status,lastKeepAlive"
-        val c = open(url)
+        val c = open(url, cfg.pinApi)
         c.requestMethod = "GET"
         c.setRequestProperty("Authorization", "Bearer $token")
         return try {
@@ -139,10 +132,10 @@ object WazuhClient {
     // Best-effort : si l'Indexer (9200) est injoignable ou refuse, on renvoie une
     // liste vide SANS faire echouer tout le chargement (les agents restent affiches).
     private fun getAlerts(cfg: Cfg, size: Int): List<WzAlert> {
-        if (cfg.idxUser.isEmpty()) return emptyList()
+        if (cfg.idxUser.isEmpty() || cfg.pinIdx.isEmpty()) return emptyList()
         return try {
             val url = "https://${cfg.host}:$IDX_PORT/wazuh-alerts-*/_search"
-            val c = open(url)
+            val c = open(url, cfg.pinIdx)
             c.requestMethod = "POST"
             c.setRequestProperty("Authorization", basic(cfg.idxUser, cfg.idxPass))
             c.setRequestProperty("Content-Type", "application/json")
