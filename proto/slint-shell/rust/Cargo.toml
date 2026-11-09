@@ -1,0 +1,30 @@
+[package]
+name = "proto"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Prototype go/no-go : coquille PurpleOps en Slint (NativeActivity Kotlin + Rust)"
+
+[lib]
+# libproto.so, chargée par NativeActivity (meta-data android.app.lib_name).
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+slint = { version = "1.18", default-features = false, features = ["std", "compat-1-2", "renderer-femtovg", "renderer-software"] }
+
+[target.'cfg(target_os = "android")'.dependencies]
+slint = { version = "1.18", default-features = false, features = ["std", "compat-1-2", "backend-android-activity-06", "renderer-femtovg", "renderer-software"] }
+jni = "0.21"
+
+# Hôte (CI ou poste) : permet `cargo check` / aperçu de l'interface hors téléphone.
+[target.'cfg(not(target_os = "android"))'.dependencies]
+slint = { version = "1.18", default-features = false, features = ["std", "compat-1-2", "backend-winit", "renderer-femtovg", "renderer-software"] }
+
+[build-dependencies]
+slint-build = "1.18"
+
+[profile.release]
+opt-level = "s"
+lto = true
+codegen-units = 1
+strip = true

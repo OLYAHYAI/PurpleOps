@@ -1,0 +1,48 @@
+// Système de design PurpleOps / soc-display (décision D4 du 09/11/2026).
+// Neutres ardoise de soc-display + violet en ACCENT (pas en fond).
+// Prototype : valeurs recopiées ici. Cible (lot L3) : généré depuis design/tokens.toml.
+
+export global Theme {
+    // Surfaces
+    out property <color> bg: #0a0e13;
+    out property <color> surface: #121820;
+    out property <color> surface-2: #1b232d;
+    out property <color> border: #1e2731;
+    // Texte
+    out property <color> text: #e6edf3;
+    out property <color> muted: #7d8a98;
+    out property <color> faint: #3a4654;
+    // Accent
+    out property <color> accent: #a37bff;
+    out property <color> accent-strong: #7c56d6;
+    out property <color> accent-soft: #c9b3ff;
+    // Sémantique (identique à l'écran SOC)
+    out property <color> ok: #2ecc71;
+    out property <color> warn: #f5a524;
+    out property <color> crit: #ff4d5e;
+    out property <color> info: #4da3ff;
+    // Console
+    out property <color> console-bg: #07060d;
+    out property <color> console-text: #9dffc4;
+
+    // Typographie (échelle 12 / 14 / 16 / 20 / 24 / 32)
+    out property <length> fs-xs: 12px;
+    out property <length> fs-sm: 14px;
+    out property <length> fs-md: 16px;
+    out property <length> fs-lg: 20px;
+    out property <length> fs-xl: 24px;
+    out property <length> fs-2xl: 32px;
+
+    // Espacements (grille 4) et rayons
+    out property <length> sp-1: 4px;
+    out property <length> sp-2: 8px;
+    out property <length> sp-3: 12px;
+    out property <length> sp-4: 16px;
+    out property <length> sp-6: 24px;
+    out property <length> r-card: 8px;
+    out property <length> r-sheet: 12px;
+
+    // Zones tactiles
+    out property <length> touch: 48px;
+    out property <length> touch-danger: 56px;
+}

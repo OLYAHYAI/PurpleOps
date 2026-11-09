@@ -6,11 +6,15 @@ on:
     # Un commit qui ne touche QUE le serveur MCP ne doit pas rebuild/réinstaller l'APK.
     paths-ignore:
       - 'mcp-server/**'
+      - 'proto/**'
+      - '.github/workflows/proto-slint.yml'
   # Verification des PR : compile tout (Rust + APK release NON signe), ne publie
   # rien et n'a acces a aucun secret.
   pull_request:
     paths-ignore:
       - 'mcp-server/**'
+      - 'proto/**'
+      - '.github/workflows/proto-slint.yml'
   workflow_dispatch:
 
 permissions:

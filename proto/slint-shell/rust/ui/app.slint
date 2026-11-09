@@ -1,0 +1,257 @@
+// Prototype go/no-go Slint pour PurpleOps (lot L2, décision D3 du 09/11/2026).
+// Une seule activité (NativeActivity sous-classée en Kotlin), navigation en
+// 4 destinations (décision D5), thème partagé avec soc-display (D4).
+// Chaque écran porte un critère du go/no-go ; le résultat se lit sur l'Accueil.
+
+import { LineEdit, ListView } from "std-widgets.slint";
+import { Theme } from "theme.slint";
+
+// 0 = à tester, 1 = OK, 2 = KO
+component Badge inherits Rectangle {
+    in property <int> state;
+    height: 24px;
+    width: label.preferred-width + 2 * Theme.sp-3;
+    border-radius: 12px;
+    background: state == 1 ? Theme.ok.with-alpha(0.18) : state == 2 ? Theme.crit.with-alpha(0.18) : Theme.surface-2;
+    label := Text {
+        text: state == 1 ? "OK" : state == 2 ? "KO" : "à tester";
+        color: state == 1 ? Theme.ok : state == 2 ? Theme.crit : Theme.muted;
+        font-size: Theme.fs-xs;
+        font-weight: 700;
+        vertical-alignment: center;
+        horizontal-alignment: center;
+    }
+}
+
+component Card inherits Rectangle {
+    background: Theme.surface;
+    border-radius: Theme.r-card;
+    border-width: 1px;
+    border-color: Theme.border;
+}
+
+// variant : 0 primaire (accent), 1 secondaire, 2 danger
+component Btn inherits Rectangle {
+    in property <string> text;
+    in property <int> variant: 0;
+    callback clicked;
+    min-height: variant == 2 ? Theme.touch-danger : Theme.touch;
+    min-width: lbl.preferred-width + 2 * Theme.sp-4;
+    border-radius: Theme.r-card;
+    background: ta.pressed ? (variant == 0 ? Theme.accent-strong : variant == 2 ? Theme.crit.darker(0.3) : Theme.border)
+                           : (variant == 0 ? Theme.accent : variant == 2 ? Theme.crit : Theme.surface-2);
+    border-width: variant == 1 ? 1px : 0px;
+    border-color: Theme.accent.with-alpha(0.5);
+    ta := TouchArea { clicked => { root.clicked(); } }
+    lbl := Text {
+        text: root.text;
+        color: variant == 1 ? Theme.accent-soft : Theme.bg;
+        font-size: Theme.fs-sm;
+        font-weight: 700;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+}
+
+component CritRow inherits HorizontalLayout {
+    in property <string> num;
+    in property <string> title;
+    in property <string> detail;
+    in property <int> state;
+    spacing: Theme.sp-3;
+    padding-top: Theme.sp-2;
+    padding-bottom: Theme.sp-2;
+    Text { text: root.num; color: Theme.accent; font-size: Theme.fs-md; font-weight: 700; width: 20px; }
+    VerticalLayout {
+        horizontal-stretch: 1;
+        Text { text: root.title; color: Theme.text; font-size: Theme.fs-md; wrap: word-wrap; }
+        Text { text: root.detail; color: Theme.muted; font-size: Theme.fs-xs; wrap: word-wrap; }
+    }
+    VerticalLayout { alignment: center; Badge { state: root.state; } }
+}
+
+component SectionTitle inherits Text {
+    color: Theme.muted;
+    font-size: Theme.fs-xs;
+    font-weight: 700;
+    letter-spacing: 1.5px;
+}
+
+component NavItem inherits Rectangle {
+    in property <string> label;
+    in property <string> glyph;
+    in property <bool> active;
+    callback clicked;
+    min-height: 56px;
+    horizontal-stretch: 1;
+    TouchArea { clicked => { root.clicked(); } }
+    VerticalLayout {
+        alignment: center;
+        spacing: 2px;
+        HorizontalLayout {
+            alignment: center;
+            Rectangle {
+                width: 56px; height: 28px; border-radius: 14px;
+                background: root.active ? Theme.accent.with-alpha(0.22) : transparent;
+                Text { text: root.glyph; color: root.active ? Theme.accent-soft : Theme.muted; font-size: Theme.fs-md; font-weight: 700; }
+            }
+        }
+        Text { text: root.label; color: root.active ? Theme.text : Theme.muted; font-size: Theme.fs-xs; horizontal-alignment: center; }
+    }
+}
+
+export component AppWindow inherits Window {
+    title: "PurpleOps — prototype Slint";
+    background: Theme.bg;
+    default-font-size: Theme.fs-md;
+
+    // Navigation (D5) : 0 Accueil, 1 Opérations, 2 Énergie, 3 Plus
+    in-out property <int> page: 0;
+
+    // Critères go/no-go (0 à tester, 1 OK, 2 KO)
+    in-out property <int> crit-build: 1;   // l'appli tourne = compilée dans la CI et lancée
+    in-out property <int> crit-ime: 0;
+    in-out property <int> crit-bio: 0;
+    in-out property <int> crit-web: 0;
+    in-out property <int> crit-size: 0;
+    in-out property <int> crit-perf: 0;
+
+    in property <string> startup-text: "…";
+    in property <string> apk-text: "…";
+    in-out property <string> bio-text: "Aucune signature demandée.";
+    in-out property <string> web-text: "Pas encore ouverte.";
+    in property <[string]> rows;
+    in property <length> top-inset: 28px;
+
+    callback bio-sign();
+    callback open-web();
+
+    VerticalLayout {
+        padding-top: root.top-inset;
+
+        // ----- contenu -----
+        Rectangle {
+            vertical-stretch: 1;
+
+            // ACCUEIL : tableau du go/no-go
+            if root.page == 0: VerticalLayout {
+                padding: Theme.sp-4;
+                spacing: Theme.sp-3;
+                Text { text: "PurpleOps · prototype Slint"; color: Theme.text; font-size: Theme.fs-xl; font-weight: 800; }
+                Text { text: "Go / no-go : chaque critère se teste dans son onglet."; color: Theme.muted; font-size: Theme.fs-sm; wrap: word-wrap; }
+                Card {
+                    VerticalLayout {
+                        padding: Theme.sp-4;
+                        CritRow { num: "1"; title: "Coquille NativeActivity Kotlin + Slint, construite par la CI"; detail: "Si cet écran s'affiche, c'est acquis."; state: root.crit-build; }
+                        CritRow { num: "2"; title: "Saisie texte (IME), accents compris"; detail: "Onglet Opérations"; state: root.crit-ime; }
+                        CritRow { num: "3"; title: "Biométrie + signature Keystore appelées depuis Rust"; detail: "Onglet Énergie : " + root.bio-text; state: root.crit-bio; }
+                        CritRow { num: "4"; title: "Activité Kotlin (WebView) puis retour"; detail: "Onglet Plus : " + root.web-text; state: root.crit-web; }
+                        CritRow { num: "5"; title: "Taille d'APK et démarrage < 1 s"; detail: "APK " + root.apk-text + " · 1re image " + root.startup-text; state: root.crit-size; }
+                        CritRow { num: "6"; title: "Défilement fluide d'une liste de 200 lignes"; detail: "Onglet Plus, jugé à l'œil"; state: root.crit-perf; }
+                    }
+                }
+            }
+
+            // OPÉRATIONS : critère 2 (IME)
+            if root.page == 1: VerticalLayout {
+                padding: Theme.sp-4;
+                spacing: Theme.sp-3;
+                alignment: start;
+                Text { text: "Opérations"; color: Theme.text; font-size: Theme.fs-xl; font-weight: 800; }
+                SectionTitle { text: "CRITÈRE 2 · SAISIE"; }
+                Text { text: "Tape : « éteindre ÉTEINDRE çà où ; nmap -sV 10.10.10.5 »"; color: Theme.muted; font-size: Theme.fs-sm; wrap: word-wrap; }
+                input := LineEdit { placeholder-text: "commande Kali…"; font-size: Theme.fs-md; }
+                Rectangle {
+                    background: Theme.console-bg;
+                    border-radius: Theme.r-card;
+                    min-height: 96px;
+                    VerticalLayout {
+                        padding: Theme.sp-3;
+                        Text { text: "$ " + input.text; color: Theme.console-text; font-family: "monospace"; font-size: Theme.fs-sm; wrap: word-wrap; }
+                        Text { text: input.text.character-count + " caractères"; color: Theme.muted; font-size: Theme.fs-xs; }
+                    }
+                }
+                HorizontalLayout {
+                    spacing: Theme.sp-3;
+                    Btn { text: "Saisie OK"; variant: 1; clicked => { root.crit-ime = 1; } }
+                    Btn { text: "Saisie KO"; variant: 1; clicked => { root.crit-ime = 2; } }
+                }
+            }
+
+            // ÉNERGIE : critère 3 (biométrie + Keystore depuis Rust)
+            if root.page == 2: VerticalLayout {
+                padding: Theme.sp-4;
+                spacing: Theme.sp-3;
+                alignment: start;
+                Text { text: "Énergie"; color: Theme.text; font-size: Theme.fs-xl; font-weight: 800; }
+                SectionTitle { text: "MAQUETTE · AUCUNE ACTION RÉELLE"; }
+                for n in [{name: "proxmox", sub: "GPU · 3 invités"}, {name: "pve", sub: "8 invités"}, {name: "F4BLOX", sub: "SOC · Wazuh, n8n, Paperclip"}]: Card {
+                    HorizontalLayout {
+                        padding: Theme.sp-3;
+                        spacing: Theme.sp-3;
+                        Rectangle { width: 10px; height: 10px; border-radius: 5px; background: Theme.ok; y: (parent.height - self.height) / 2; }
+                        VerticalLayout {
+                            horizontal-stretch: 1;
+                            Text { text: n.name; color: Theme.text; font-size: Theme.fs-md; font-weight: 700; }
+                            Text { text: n.sub; color: Theme.muted; font-size: Theme.fs-xs; }
+                        }
+                    }
+                }
+                SectionTitle { text: "CRITÈRE 3 · BIOMÉTRIE"; }
+                Text { text: "Le bouton demande l'empreinte puis signe un nonce avec une clé ECDSA P-256 du Keystore (StrongBox si possible), liée à la biométrie à chaque usage. Rien n'est envoyé."; color: Theme.muted; font-size: Theme.fs-sm; wrap: word-wrap; }
+                Btn { text: "Signer (empreinte)"; variant: 2; clicked => { root.bio-sign(); } }
+                Text { text: root.bio-text; color: root.crit-bio == 1 ? Theme.ok : root.crit-bio == 2 ? Theme.crit : Theme.muted; font-size: Theme.fs-sm; wrap: word-wrap; }
+            }
+
+            // PLUS : critères 4 (activité Kotlin) et 6 (liste)
+            if root.page == 3: VerticalLayout {
+                padding: Theme.sp-4;
+                spacing: Theme.sp-3;
+                Text { text: "Plus"; color: Theme.text; font-size: Theme.fs-xl; font-weight: 800; }
+                SectionTitle { text: "CRITÈRE 4 · ACTIVITÉ KOTLIN"; }
+                HorizontalLayout {
+                    spacing: Theme.sp-3;
+                    Btn { text: "Ouvrir la WebView"; variant: 0; clicked => { root.open-web(); } }
+                    VerticalLayout { alignment: center; Text { text: root.web-text; color: Theme.muted; font-size: Theme.fs-xs; wrap: word-wrap; } }
+                }
+                SectionTitle { text: "CRITÈRE 6 · LISTE DE 200 LIGNES"; }
+                HorizontalLayout {
+                    spacing: Theme.sp-3;
+                    Btn { text: "Fluide"; variant: 1; clicked => { root.crit-perf = 1; } }
+                    Btn { text: "Saccadé"; variant: 1; clicked => { root.crit-perf = 2; } }
+                    Btn { text: "Taille/démarrage OK"; variant: 1; clicked => { root.crit-size = 1; } }
+                }
+                Card {
+                    vertical-stretch: 1;
+                    ListView {
+                        for r[i] in root.rows: Rectangle {
+                            height: Theme.touch;
+                            background: mod(i, 2) == 0 ? transparent : Theme.surface-2.with-alpha(0.4);
+                            HorizontalLayout {
+                                padding-left: Theme.sp-3;
+                                padding-right: Theme.sp-3;
+                                spacing: Theme.sp-3;
+                                Rectangle { width: 8px; height: 8px; border-radius: 4px; y: (parent.height - self.height) / 2;
+                                    background: mod(i, 7) == 0 ? Theme.crit : mod(i, 3) == 0 ? Theme.warn : Theme.ok; }
+                                Text { text: r; color: Theme.text; font-size: Theme.fs-sm; vertical-alignment: center; overflow: elide; horizontal-stretch: 1; }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // ----- navigation (D5) -----
+        Rectangle {
+            background: Theme.surface;
+            height: 64px;
+            Rectangle { y: 0; height: 1px; background: Theme.border; }
+            HorizontalLayout {
+                NavItem { label: "Accueil"; glyph: "◉"; active: root.page == 0; clicked => { root.page = 0; } }
+                NavItem { label: "Opérations"; glyph: ">_"; active: root.page == 1; clicked => { root.page = 1; } }
+                NavItem { label: "Énergie"; glyph: "⏻"; active: root.page == 2; clicked => { root.page = 2; } }
+                NavItem { label: "Plus"; glyph: "⋯"; active: root.page == 3; clicked => { root.page = 3; } }
+            }
+        }
+    }
+}
