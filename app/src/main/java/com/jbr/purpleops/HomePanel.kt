@@ -138,7 +138,7 @@ class HomePanel(
         c.addView(label("Nœuds & énergie", right))
         var anyNotUp = false
         for (n in Cluster.NODES) {
-            val mn = m?.nodes?.firstOrNull { it.name.equals(n.pveName, true) }
+            val mn = if (n.inCluster) m?.nodes?.firstOrNull { it.name.equals(n.pveName, true) } else m?.pbs
             val up: Boolean? = mn?.online ?: probe[n.target]
             if (up != true && n.inCluster) anyNotUp = true
             val box = LinearLayout(act).apply {
@@ -160,7 +160,11 @@ class HomePanel(
             }
             val foot = row().apply { setPadding(0, dp(8), 0, 0) }
             foot.addView(text(
-                wakeStatus[n.target] ?: if (mn != null && mn.online) "${mn.guestsRunning}/${mn.guestsTotal} invités en marche" else "réveil via wol-pi (${n.via})",
+                wakeStatus[n.target] ?: when {
+                    !n.inCluster && up == true -> "Proxmox Backup Server · :${n.port}"
+                    mn != null && mn.online -> "${mn.guestsRunning}/${mn.guestsTotal} invités en marche"
+                    else -> "réveil via wol-pi (${n.via})"
+                },
                 11.5f, if (wakeStatus[n.target] != null) cInfo else cMuted
             ).apply { layoutParams = LinearLayout.LayoutParams(0, -2, 1f) })
             if (up == true) foot.addView(button(if (n.inCluster) "Proxmox ↗" else "PBS ↗", primary = false) { openUrl(Cluster.proxmoxUrl(n)) })

@@ -30,6 +30,8 @@ data class Metrics(
     val collectedAt: String?,
     val level: Int, val levelText: String, val reasons: List<String>,
     val quorate: Boolean?, val nodes: List<MNode>,
+    /** Serveur de sauvegarde (bloc `pbs` de soc-display ≥ 0.4.5) : null s'il dort ou si l'API n'est pas configurée. */
+    val pbs: MNode?,
     val crit: Int, val high: Int, val total24h: Long, val recent: List<MAlert>,
     val agentsActive: Int, val agentsTotal: Int, val agentsDown: List<String>,
     val powerW: Double?, val dayAvgW: Double?,
@@ -121,6 +123,10 @@ object MetricsClient {
             collectedAt = if (j.isNull("collected_at")) null else j.optString("collected_at"),
             level = ov.optInt("level"), levelText = ov.optString("text"), reasons = ov.optJSONArray("reasons").strings(),
             quorate = pve?.let { if (it.isNull("quorate")) null else it.optBoolean("quorate") }, nodes = nodes,
+            pbs = j.optObj("pbs")?.let {
+                MNode("pbs", it.optBoolean("online", true), it.optDouble("cpu", 0.0), it.optInt("maxcpu"),
+                    it.optLong("mem"), it.optLong("maxmem"), it.optLong("uptime"), 0, 0)
+            },
             crit = al?.optInt("crit") ?: 0, high = al?.optInt("high") ?: 0,
             total24h = so?.optLong("total_24h") ?: 0, recent = recent,
             agentsActive = ag?.optInt("active") ?: 0, agentsTotal = ag?.optInt("total") ?: 0, agentsDown = ag?.optJSONArray("disconnected").strings(),
