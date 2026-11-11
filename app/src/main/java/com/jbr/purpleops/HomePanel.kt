@@ -80,7 +80,8 @@ class HomePanel(
                 wz = (WazuhClient.load(act.applicationContext) as? WzResult.Ok)?.summary
                 probe = Cluster.probe()
             } else {
-                probe = emptyMap()
+                // /metrics.json ne couvre que le cluster : PBS (hors cluster) est sondé directement.
+                probe = Cluster.probe(Cluster.NODES.filter { !it.inCluster })
             }
             loading = false
             render()

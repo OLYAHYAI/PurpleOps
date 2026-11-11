@@ -62,8 +62,8 @@ object Cluster {
     fun proxmoxUrl(n: NodeDef) = "https://${n.ip}:${n.port}/"
 
     /** Sonde directe : l'interface web répond-elle (8006 PVE, 8007 PBS) ? */
-    suspend fun probe(): Map<String, Boolean> = coroutineScope {
-        NODES.map { n ->
+    suspend fun probe(nodes: List<NodeDef> = NODES): Map<String, Boolean> = coroutineScope {
+        nodes.map { n ->
             async(Dispatchers.IO) {
                 n.target to try {
                     Socket().use { it.connect(InetSocketAddress(n.ip, n.port), 3000) }; true
