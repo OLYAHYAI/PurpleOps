@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <!-- Logo PurpleOps : bouclier (défense) + invite de commande ">_" (opérations offensives / automatisation). -->
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#17132a"/>
+      <stop offset="1" stop-color="#0b0a12"/>
+    </linearGradient>
+    <linearGradient id="shield" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#c9b3ff"/>
+      <stop offset="0.45" stop-color="#a37bff"/>
+      <stop offset="1" stop-color="#5b3aa8"/>
+    </linearGradient>
+    <linearGradient id="inner" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#1d1733"/>
+      <stop offset="1" stop-color="#0e0b1a"/>
+    </linearGradient>
+  </defs>
+  <rect x="0" y="0" width="512" height="512" rx="112" fill="url(#bg)"/>
+  <!-- Bouclier -->
+  <path d="M256 54 L414 112 V236 C414 340 346 418 256 458 C166 418 98 340 98 236 V112 Z" fill="url(#shield)"/>
+  <path d="M256 92 L380 138 V238 C380 322 326 386 256 420 C186 386 132 322 132 238 V138 Z" fill="url(#inner)"/>
+  <!-- Invite ">_" -->
+  <path d="M178 196 L250 254 L178 312" fill="none" stroke="#c9b3ff" stroke-width="34" stroke-linecap="round" stroke-linejoin="round"/>
+  <rect x="268" y="290" width="76" height="30" rx="15" fill="#9dffc4"/>
+</svg>

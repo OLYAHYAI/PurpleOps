@@ -134,6 +134,7 @@ impl WaitWindow {
         let (w, h) = (480, 90);
         let win = Window::new("PurpleOps — écran USB", w, h, WindowOptions::default())
             .map_err(|e| err(&format!("fenêtre : {e}")))?;
+        set_window_icon(&win);
         let mut buf = vec![0x0B0A12u32; w * h];
         for x in 0..w {
             for y in 40..50 {
@@ -344,6 +345,7 @@ fn session(mut s: TcpStream, mbps: u32) -> io::Result<bool> {
 
     let opts = WindowOptions { resize: true, ..WindowOptions::default() };
     let mut win = Window::new("PurpleOps — écran USB", iw, ih, opts).map_err(|e| err(&format!("fenêtre : {e}")))?;
+    set_window_icon(&win);
     win.limit_update_rate(Some(Duration::from_millis(6)));
     let (ch_tx, ch_rx) = mpsc::channel::<char>();
     win.set_input_callback(Box::new(Chars(ch_tx)));
@@ -890,6 +892,44 @@ fn b64_utf16(s: &str) -> String {
     }
     o
 }
+
+/// Icône PurpleOps (ressource id 1 de l'exécutable, voir build.rs) sur la fenêtre :
+/// barre de titre (petite) et Alt+Tab / barre des tâches (grande).
+#[cfg(windows)]
+fn set_window_icon(win: &Window) {
+    use std::ffi::c_void;
+    #[link(name = "user32")]
+    extern "system" {
+        fn LoadImageW(inst: *mut c_void, name: *const u16, kind: u32, cx: i32, cy: i32, flags: u32) -> *mut c_void;
+        fn GetSystemMetrics(index: i32) -> i32;
+        fn SendMessageW(hwnd: *mut c_void, msg: u32, wparam: usize, lparam: isize) -> isize;
+    }
+    #[link(name = "kernel32")]
+    extern "system" {
+        fn GetModuleHandleW(name: *const u16) -> *mut c_void;
+    }
+    const IMAGE_ICON: u32 = 1;
+    const WM_SETICON: u32 = 0x0080;
+    const ICON_SMALL: usize = 0;
+    const ICON_BIG: usize = 1;
+    const SM_CXICON: i32 = 11;
+    const SM_CXSMICON: i32 = 49;
+    unsafe {
+        let hwnd = win.get_window_handle();
+        let inst = GetModuleHandleW(std::ptr::null());
+        let id = 1usize as *const u16; // MAKEINTRESOURCEW(1)
+        for (which, metric) in [(ICON_BIG, SM_CXICON), (ICON_SMALL, SM_CXSMICON)] {
+            let px = GetSystemMetrics(metric);
+            let icon = LoadImageW(inst, id, IMAGE_ICON, px, px, 0);
+            if !icon.is_null() {
+                SendMessageW(hwnd, WM_SETICON, which, icon as isize);
+            }
+        }
+    }
+}
+
+#[cfg(not(windows))]
+fn set_window_icon(_win: &Window) {}
 
 #[cfg(windows)]
 fn message_box(text: &str) {
