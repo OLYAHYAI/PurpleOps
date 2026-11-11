@@ -17,7 +17,7 @@ import java.security.MessageDigest
  * Réveil des nœuds Proxmox par wol-pi (Wake-on-LAN), depuis le téléphone.
  *
  * Réutilise l'outil existant du Pi, sans rien y ajouter : compte `wol`, commande
- * imposée `wake-request` (liste fermée proxmox | f4blox | pve), audit Wazuh
+ * imposée `wake-request` (liste fermée proxmox | f4blox | pve | pbs), audit Wazuh
  * 100720-100727. Le téléphone joint wol-pi en pair Tailscale direct : il peut
  * donc réveiller F4BLOX (que n8n, hébergé dessus, ne peut pas réveiller) et
  * même les trois nœuds éteints.
@@ -37,7 +37,7 @@ object WolClient {
     const val P_HOST = "wol_host"
     const val P_HOSTKEY = "wol_hostkey"           // base64 du blob de clé d'hôte épinglé
     const val HOSTKEY_ALG = "ecdsa-sha2-nistp256"
-    val TARGETS = listOf("f4blox", "pve", "proxmox") // ordre de « Tout allumer » : le SOC d'abord
+    val TARGETS = listOf("f4blox", "pve", "proxmox", "pbs") // alignée sur wake-node (wol-pi) ; « Tout allumer » = Cluster.CLUSTER
     private val RESULTS = setOf("sent", "already_up", "no_link", "error", "rejected")
 
     private fun prefs(ctx: Context) = ctx.getSharedPreferences("purpleops", Context.MODE_PRIVATE)
