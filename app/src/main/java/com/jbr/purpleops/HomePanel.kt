@@ -139,7 +139,7 @@ class HomePanel(
         for (n in Cluster.NODES) {
             val mn = m?.nodes?.firstOrNull { it.name.equals(n.pveName, true) }
             val up: Boolean? = mn?.online ?: probe[n.target]
-            if (up != true) anyNotUp = true
+            if (up != true && n.inCluster) anyNotUp = true
             val box = LinearLayout(act).apply {
                 orientation = LinearLayout.VERTICAL
                 setBackgroundResource(R.drawable.tile)
@@ -151,7 +151,7 @@ class HomePanel(
             head.addView(dot(when (up) { true -> cOk; false -> cMuted; null -> cMuted }))
             head.addView(text(n.pveName, 15f, cText, bold = true).apply { setPadding(dp(8), 0, dp(8), 0) })
             head.addView(text(n.role, 11.5f, cMuted).apply { layoutParams = LinearLayout.LayoutParams(0, -2, 1f); maxLines = 1; ellipsize = TextUtils.TruncateAt.END })
-            head.addView(text(when { mn != null && mn.online -> upt(mn.uptime); up == true -> "en ligne"; up == false -> "éteint / injoignable"; else -> "…" }, 11.5f, cMuted))
+            head.addView(text(when { mn != null && mn.online -> upt(mn.uptime); up == true -> "en ligne"; up == false -> if (n.inCluster) "éteint / injoignable" else "en veille"; else -> "…" }, 11.5f, cMuted))
             box.addView(head)
             if (mn != null && mn.online) {
                 box.addView(barRow("CPU", mn.cpu, "${(mn.cpu * 100).toInt()} %"))
@@ -162,12 +162,12 @@ class HomePanel(
                 wakeStatus[n.target] ?: if (mn != null && mn.online) "${mn.guestsRunning}/${mn.guestsTotal} invités en marche" else "réveil via wol-pi (${n.via})",
                 11.5f, if (wakeStatus[n.target] != null) cInfo else cMuted
             ).apply { layoutParams = LinearLayout.LayoutParams(0, -2, 1f) })
-            if (up == true) foot.addView(button("Proxmox ↗", primary = false) { openUrl(Cluster.proxmoxUrl(n)) })
+            if (up == true) foot.addView(button(if (n.inCluster) "Proxmox ↗" else "PBS ↗", primary = false) { openUrl(Cluster.proxmoxUrl(n)) })
             else foot.addView(button("Allumer", primary = true) { confirmWake(listOf(n)) })
             box.addView(foot)
             c.addView(box)
         }
-        if (anyNotUp) c.addView(button("Tout allumer", primary = true) { confirmWake(Cluster.NODES) }.apply {
+        if (anyNotUp) c.addView(button("Tout allumer", primary = true) { confirmWake(Cluster.CLUSTER) }.apply {
             layoutParams = lp().apply { topMargin = dp(2) }; gravity = Gravity.CENTER
         })
         c.addView(note("Allumer : wol-pi (audit Wazuh 100721+) · Éteindre : interface Proxmox du nœud (↗)."))
@@ -315,7 +315,7 @@ class HomePanel(
                 if (r == "sent") sent += n
                 render()
             }
-            // Suivi : le nœud répond-il sur 8006 (Tailscale) ? 18 × 10 s = 3 min
+            // Suivi : l'interface web répond-elle (8006 PVE / 8007 PBS) ? 18 × 10 s = 3 min
             for (i in 1..18) {
                 if (sent.isEmpty()) break
                 delay(10_000)
@@ -323,7 +323,7 @@ class HomePanel(
                 val iter = sent.iterator()
                 while (iter.hasNext()) {
                     val n = iter.next()
-                    if (p[n.target] == true) { wakeStatus[n.target] = "allumé ✓ (API Proxmox joignable)"; iter.remove() }
+                    if (p[n.target] == true) { wakeStatus[n.target] = "allumé ✓ (interface :${n.port} joignable)"; iter.remove() }
                     else wakeStatus[n.target] = "démarrage… ${i * 10} s"
                 }
                 render()

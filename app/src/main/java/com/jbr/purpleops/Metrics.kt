@@ -38,23 +38,35 @@ data class Metrics(
     val net: List<MTarget>, val dnsOk: Boolean?, val dnsMs: Double?,
 )
 
-/** Nœuds du cluster : liste FIXE embarquée (l'Énergie doit marcher quand tout est éteint). */
-data class NodeDef(val target: String, val pveName: String, val tailscaleIp: String, val role: String, val via: String)
+/**
+ * Machines réveillables : liste FIXE embarquée (l'Énergie doit marcher quand tout est éteint).
+ * [ip] : IP Tailscale pour les nœuds du cluster ; IP LAN (routes de sous-réseau pfSense/F4BLOX)
+ * pour PBS, qui n'a volontairement pas Tailscale (serveur de sauvegarde isolé).
+ * [port] : interface web sondée et ouverte (8006 PVE, 8007 PBS).
+ * [inCluster] : false pour PBS (hors cluster, en veille la plupart du temps) → pas dans « Tout allumer ».
+ */
+data class NodeDef(
+    val target: String, val pveName: String, val ip: String, val role: String, val via: String,
+    val port: Int = 8006, val inCluster: Boolean = true,
+)
 
 object Cluster {
     val NODES = listOf(
         NodeDef("f4blox", "F4BLOX", "100.98.171.60", "SOC · Wazuh, n8n, Paperclip", "wlan0"),
         NodeDef("pve", "pve", "100.64.189.9", "Velociraptor, nrj-hub", "wlan0"),
         NodeDef("proxmox", "proxmox", "100.123.155.93", "GPU · soc-display, Zeek", "eth0"),
+        NodeDef("pbs", "BU (PBS)", "10.10.10.222", "Sauvegarde · Proxmox Backup Server", "wlan0", port = 8007, inCluster = false),
     )
-    fun proxmoxUrl(n: NodeDef) = "https://${n.tailscaleIp}:8006/"
+    /** Les 3 nœuds du cluster (« Tout allumer »). */
+    val CLUSTER = NODES.filter { it.inCluster }
+    fun proxmoxUrl(n: NodeDef) = "https://${n.ip}:${n.port}/"
 
-    /** Sonde directe : le port 8006 répond-il (Tailscale du nœud) ? */
+    /** Sonde directe : l'interface web répond-elle (8006 PVE, 8007 PBS) ? */
     suspend fun probe(): Map<String, Boolean> = coroutineScope {
         NODES.map { n ->
             async(Dispatchers.IO) {
                 n.target to try {
-                    Socket().use { it.connect(InetSocketAddress(n.tailscaleIp, 8006), 3000) }; true
+                    Socket().use { it.connect(InetSocketAddress(n.ip, n.port), 3000) }; true
                 } catch (e: Exception) { false }
             }
         }.awaitAll().toMap()
