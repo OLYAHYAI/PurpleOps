@@ -37,6 +37,7 @@ class ScreenPanel(
     private val auto: CheckBox = root.findViewById(R.id.scrAuto)
     private val dim: CheckBox = root.findViewById(R.id.scrDim)
     private val ai: CheckBox = root.findViewById(R.id.scrAi)
+    private val lan: CheckBox = root.findViewById(R.id.scrLan)
     private val pcs: TextView = root.findViewById(R.id.scrPcs)
     private val log: TextView = root.findViewById(R.id.scrLog)
     private val logScroll: ScrollView = root.findViewById(R.id.scrLogScroll)
@@ -67,6 +68,14 @@ class ScreenPanel(
         ai.isChecked = prefs.getBoolean("screen_ai", false)
         ai.setOnCheckedChangeListener { _, on ->
             prefs.edit().putBoolean("screen_ai", on).apply()
+            if (running) {
+                Toast.makeText(act, "Pris en compte au prochain démarrage du service (ARRÊTER puis ACTIVER)", Toast.LENGTH_LONG).show()
+            }
+        }
+        // Sans câble : diffuse sur l'IP Tailscale au lieu de la carte réseau USB.
+        lan.isChecked = prefs.getBoolean("screen_lan", false)
+        lan.setOnCheckedChangeListener { _, on ->
+            prefs.edit().putBoolean("screen_lan", on).apply()
             if (running) {
                 Toast.makeText(act, "Pris en compte au prochain démarrage du service (ARRÊTER puis ACTIVER)", Toast.LENGTH_LONG).show()
             }
@@ -123,7 +132,18 @@ class ScreenPanel(
             try {
                 val opts = (if (dim.isChecked) " --dim" else "") +
                     (if (ai.isChecked) " --ctl /data/local/kali/opt/purpleops-mcp/screenctl.sock" else "")
-                val p = ProcessBuilder("su", "-c", "exec '$bin' serve --usb$opts 2>&1")
+                // --usb : lien par câble (carte réseau NCM). Sans câble : on bind sur
+                // l'IP Tailscale (100.64.0.0/10) de l'interface ; screenview.exe s'y
+                // connecte via le tailnet (screenview.exe <ip-du-tel> 8099).
+                val cmd = if (lan.isChecked) {
+                    "TSIP=\$(ip -4 -o addr 2>/dev/null | grep -oE " +
+                        "'100[.](6[4-9]|[7-9][0-9]|1[01][0-9]|12[0-7])[.][0-9]+[.][0-9]+' | head -1); " +
+                        "if [ -z \"\$TSIP\" ]; then echo '[erreur] pas d IP Tailscale (Tailscale actif ?)'; exit 1; fi; " +
+                        "exec '$bin' serve --listen \$TSIP:8099$opts 2>&1"
+                } else {
+                    "exec '$bin' serve --usb$opts 2>&1"
+                }
+                val p = ProcessBuilder("su", "-c", cmd)
                     .redirectErrorStream(true).start()
                 started = p
                 proc = p
@@ -161,7 +181,7 @@ class ScreenPanel(
             "listen" -> {
                 val ip = rest.substringAfter("listen=").substringBefore(':')
                 status.text = "Actif — en attente du PC"
-                info.text = "Téléphone : $ip\nSur le PC : double-clic sur screenview.exe."
+                info.text = "Téléphone : $ip\nSur le PC : screenview.exe $ip 8099"
             }
             "waiting-cable" -> status.text = "En attente du câble USB (branché au PC)…"
             "link-lost" -> status.text = "Câble débranché — reprise automatique au rebranchement"
