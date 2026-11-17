@@ -35,7 +35,7 @@ Format d'un preset :
 
 Écran « Chat SOC » (raccourci `#` sur l'Accueil) : le même salon qu'Element X.
 
-- Connexion une fois avec le compte `@f4blox` : l'appli ouvre **sa propre session** (appareil « PurpleOps (téléphone) »), révocable seule (menu ⋮ › Déconnecter, ou depuis Element X). Le mot de passe n'est jamais stocké ; le jeton est chiffré par `SecureStore` (Keystore).
+- Connexion une fois avec un compte humain du SOC (`@lineageos` par défaut, ou `@f4blox` ; liste `owners` de `/etc/paperclip-matrix/room.json` sur la VM 122) : l'appli ouvre **sa propre session** (appareil « PurpleOps (téléphone) »), révocable seule (menu ⋮ › Déconnecter, ou depuis Element X). Le mot de passe n'est jamais stocké ; le jeton est chiffré par `SecureStore` (Keystore).
 - `@agent` (pastilles sous le fil ou saisie) pose `m.mentions` : le pont `matrix-soc-bridge` (VM 122) crée un ticket Paperclip `[Element X]` assigné à l'agent, qui répond dans le fil. Toucher un message = y répondre (répondre à un agent le sollicite aussi). `@paperclip tickets` = état des tickets.
 - Contexte : appui long sur une alerte de l'Accueil, ou bouton `→ #soc` dans Kali, ouvre le chat avec un message prérempli pour `@jbr` (modifiable avant envoi).
 - Périmètre volontairement réduit : un salon, texte seul, pas d'E2EE (salon non chiffré), synchronisation seulement écran affiché, aucune notification (Element X les garde). Les messages reçus sont affichés comme du texte brut (pas de lien cliquable, pas de HTML).
