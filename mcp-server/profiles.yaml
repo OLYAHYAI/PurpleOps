@@ -1,0 +1,92 @@
+# PurpleOps MCP — catalogue de profils d'assessment (VERSIONNE, livré par l'update).
+#
+# Ce fichier est fusionné au démarrage avec les éventuels `profiles:` de config.yaml
+# (config.yaml a la priorité : tu peux y surcharger un profil sans toucher ce fichier).
+#
+# REGLES (identiques au reste du MCP, garde-fous 3/4/5) :
+#  - assessment / enumeration UNIQUEMENT, jamais d'exploitation.
+#  - {TARGET} = IP littérale validée contre allowed_targets (CIDR) ; {TARGET_PORT} = port.
+#  - chaque token du tableau `args` est un argv (pas de shell) ; {TARGET} reste UN token.
+#  - le binaire doit exister dans le chroot Kali ; sinon l'appel échoue proprement
+#    (journalisé). Installer au besoin : apt install <paquet>.
+profiles:
+
+  # ---- Recon / découverte réseau --------------------------------------------
+  nmap_quick:
+    bin: "/usr/bin/nmap"
+    args: ["-sV", "-Pn", "-T3", "--top-ports", "100", "{TARGET}"]
+    takes_target: true
+  nmap_full_tcp:
+    bin: "/usr/bin/nmap"
+    args: ["-sV", "-Pn", "-T3", "-p-", "{TARGET}"]
+    takes_target: true
+  nmap_udp_top:
+    bin: "/usr/bin/nmap"
+    args: ["-sU", "-Pn", "-T3", "--top-ports", "50", "{TARGET}"]
+    takes_target: true
+  nmap_default_scripts:
+    bin: "/usr/bin/nmap"
+    args: ["-sC", "-sV", "-Pn", "-T3", "{TARGET}"]
+    takes_target: true
+
+  # ---- DNS -------------------------------------------------------------------
+  dnsrecon_std:
+    bin: "/usr/bin/dnsrecon"
+    args: ["-n", "{TARGET}", "-d", "{TARGET}"]
+    takes_target: true
+  dig_reverse:
+    bin: "/usr/bin/dig"
+    args: ["-x", "{TARGET}", "+short"]
+    takes_target: true
+
+  # ---- Web (énumération, pas d'exploitation) --------------------------------
+  http_headers:
+    bin: "/usr/bin/curl"
+    args: ["-sSI", "--max-time", "15", "http://{TARGET}"]
+    takes_target: true
+  whatweb_host:
+    bin: "/usr/bin/whatweb"
+    args: ["--color=never", "http://{TARGET}"]
+    takes_target: true
+  wafw00f_host:
+    bin: "/usr/bin/wafw00f"
+    args: ["http://{TARGET}"]
+    takes_target: true
+  nikto_host:
+    bin: "/usr/bin/nikto"
+    args: ["-host", "{TARGET}", "-port", "{TARGET_PORT}", "-maxtime", "120s"]
+    takes_target: true
+
+  # ---- TLS / SSH -------------------------------------------------------------
+  sslscan_host:
+    bin: "/usr/bin/sslscan"
+    args: ["{TARGET}:{TARGET_PORT}"]
+    takes_target: true
+  ssh_audit:
+    bin: "/usr/bin/ssh-audit"
+    args: ["{TARGET}"]
+    takes_target: true
+
+  # ---- SMB / NetBIOS (énumération) ------------------------------------------
+  smbmap_host:
+    bin: "/usr/bin/smbmap"
+    args: ["-H", "{TARGET}"]
+    takes_target: true
+  nbtscan_host:
+    bin: "/usr/bin/nbtscan"
+    args: ["{TARGET}"]
+    takes_target: true
+  enum4linux_host:
+    bin: "/usr/bin/enum4linux"
+    args: ["-a", "{TARGET}"]
+    takes_target: true
+
+  # ---- SNMP ------------------------------------------------------------------
+  snmp_check:
+    bin: "/usr/bin/snmp-check"
+    args: ["{TARGET}"]
+    takes_target: true
+  onesixtyone_host:
+    bin: "/usr/bin/onesixtyone"
+    args: ["{TARGET}"]
+    takes_target: true

@@ -3,7 +3,10 @@
 
 # --- Réseau : Tailscale-only --------------------------------------------------
 # IP Tailscale du téléphone. JAMAIS 0.0.0.0. (127.0.0.1 réservé aux tests locaux.)
-bind_host: "100.126.112.23"
+# "auto" = détecte seul l'IP Tailscale (100.64.0.0/10) de l'interface — recommandé
+# pour l'usage sans câble (ne casse pas si l'IP du tailnet change). Une IP littérale
+# reste acceptée.
+bind_host: "auto"
 bind_port: 8765
 
 # --- Secrets & journal --------------------------------------------------------
@@ -34,25 +37,12 @@ allowed_targets:
   # ajouter ici le VLAN cible purple-team dédié si besoin
 
 # --- Profils figés (assessment uniquement, pas d'exploitation) ----------------
+# Le catalogue vit désormais dans profiles.yaml (VERSIONNE, livré par l'update).
+# Ci-dessous tu peux l'ÉTENDRE ou SURCHARGER : un profil de même nom défini ici est
+# prioritaire sur celui de profiles.yaml. Laisser commenté = catalogue versionné tel quel.
 # {TARGET} / {TARGET_PORT} sont substitués comme UN SEUL token argv (pas de shell).
-profiles:
-  nmap_quick:
-    bin: "/usr/bin/nmap"
-    args: ["-sV", "-Pn", "-T3", "--top-ports", "100", "{TARGET}"]
-    takes_target: true
-  nmap_full_tcp:
-    bin: "/usr/bin/nmap"
-    args: ["-sV", "-Pn", "-T3", "-p-", "{TARGET}"]
-    takes_target: true
-  sslscan_host:
-    bin: "/usr/bin/sslscan"
-    args: ["{TARGET}:{TARGET_PORT}"]
-    takes_target: true
-  ssh_audit:
-    bin: "/usr/bin/ssh-audit"
-    args: ["{TARGET}"]
-    takes_target: true
-  dnsrecon_std:
-    bin: "/usr/bin/dnsrecon"
-    args: ["-n", "{TARGET}", "-d", "{TARGET}"]
-    takes_target: true
+#profiles:
+#  nmap_quick:
+#    bin: "/usr/bin/nmap"
+#    args: ["-sV", "-Pn", "-T3", "--top-ports", "50", "{TARGET}"]
+#    takes_target: true
