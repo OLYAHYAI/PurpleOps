@@ -3,6 +3,8 @@ package com.jbr.purpleops
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
+import android.content.Intent
+import android.net.Uri
 import android.graphics.Color
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
@@ -35,12 +37,20 @@ import java.util.Locale
  *   arrière-plan) ; les notifications restent à Element X.
  * - Les messages reçus sont du TEXTE : aucun lien n'est rendu cliquable,
  *   aucun HTML n'est interprété (contenu des agents = données, pas ordres).
+ *   Seules exceptions, contrôlées : sous un message du pont (@paperclip),
+ *   « Ouvrir le ticket » (domaine Paperclip du tailnet uniquement) et
+ *   « Valider / Refuser » quand le pont annonce une décision en attente.
+ * - Chaque envoi et chaque décision laisse une ligne dans purpleops-runs.log
+ *   (agent Wazuh 027, règles 100315 / 100316).
  */
 class ChatPanel(
     private val act: AppCompatActivity,
     root: View,
     private val ui: CoroutineScope,
-    private val onBack: () -> Unit,
+    /** Nombre de mentions / décisions arrivées hors de l'écran (pastille de l'onglet). */
+    private val onUnread: (Int) -> Unit = {},
+    /** Ligne d'audit (sans le préfixe syslog) : « soc … » ou « soc_decision … ». */
+    private val audit: (String) -> Unit = {},
 ) {
     private val ctx: Context get() = act.applicationContext
 
@@ -78,13 +88,16 @@ class ChatPanel(
     private var job: Job? = null
     private var visible = false
     private var lastSend = 0L
+    private var unread = 0
+    private var peeking = false
+    private val ticketUrl = Regex("https://paperclip-vm\\.tail8a4866\\.ts\\.net/[A-Z]+/issues/([A-Z]+-\\d+)")
     private val hhmm = SimpleDateFormat("HH:mm", Locale.FRANCE)
     private val dayFmt = SimpleDateFormat("EEEE d MMMM", Locale.FRANCE)
 
     private fun dp(v: Int) = (v * act.resources.displayMetrics.density).toInt()
 
     init {
-        root.findViewById<View>(R.id.chatBack).setOnClickListener { onBack() }
+        root.findViewById<View>(R.id.chatBack).visibility = View.GONE   // onglet de la barre : pas de retour ici
         root.findViewById<View>(R.id.chatMenu).setOnClickListener { menu() }
         root.findViewById<View>(R.id.chatConnect).setOnClickListener { login() }
         root.findViewById<View>(R.id.chatReplyCancel).setOnClickListener { setReply(null) }
@@ -99,7 +112,43 @@ class ChatPanel(
 
     fun setVisible(v: Boolean) {
         visible = v
-        if (v) start() else stop()
+        if (v) { setUnread(0); start() } else stop()
+    }
+
+    private fun setUnread(n: Int) { unread = n; onUnread(n) }
+
+    /**
+     * Écran masqué : un tour de /sync sans attente (appelé toutes les 60 s par
+     * l'activité au premier plan) pour la pastille. Les messages sont gardés dans
+     * le fil ; le premier chargement ne compte pas comme non lu.
+     */
+    fun peek() {
+        val s = session ?: return
+        if (visible || peeking || job?.isActive == true) return
+        peeking = true
+        ui.launch {
+            try {
+                if (members.isEmpty()) { members = MatrixClient.members(s); renderAgents() }
+                val first = since == null
+                val r = MatrixClient.sync(ctx, s, since, 0)
+                if (session !== s || visible) return@launch
+                since = r.nextBatch
+                if (r.messages.isNotEmpty()) {
+                    val fresh = r.messages.filter { it.eventId !in seen }
+                    add(r.messages)
+                    if (!first) {
+                        val n = fresh.count { it.sender != me() && (me() in it.mentions || it.decisionIssue != null) }
+                        if (n > 0) setUnread(unread + n)
+                    }
+                }
+            } catch (e: MatrixClient.MxError) {
+                if (e.status == 401 || e.errcode == "M_UNKNOWN_TOKEN") { MatrixClient.forget(ctx); session = null; since = null; showMode() }
+            } catch (e: Exception) {
+                // hors ligne : on réessaiera au prochain tour
+            } finally {
+                peeking = false
+            }
+        }
     }
 
     /** Ouvre le chat avec un message prérempli (ex. alerte -> « @jbr analyse … »). */
@@ -304,7 +353,82 @@ class ChatPanel(
             setPadding(0, dp(3), 0, 0)
             // Pas d'autoLink : le contenu des agents est une donnée.
         })
+        if (isBridge(m.sender)) bridgeActions(m)?.let { box.addView(it) }
         return box
+    }
+
+    /** Compte du pont (@paperclip sur le même serveur que la session). */
+    private fun isBridge(uid: String) = uid == "@paperclip:" + me().substringAfter(':', "maison")
+
+    private fun bridgeActions(m: MatrixClient.Msg): View? {
+        val ticket = ticketUrl.find(m.body)
+        val decision = m.decisionIssue
+        if (ticket == null && decision == null) return null
+        val row = LinearLayout(act).apply {
+            orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
+            setPadding(0, dp(8), 0, 0)
+        }
+        fun btn(label: String, color: Int, onClick: () -> Unit) = TextView(act).apply {
+            text = label; setTextColor(color); textSize = 12.5f; setTypeface(null, Typeface.BOLD)
+            setBackgroundResource(R.drawable.btn_neon); gravity = Gravity.CENTER
+            setPadding(dp(12), dp(8), dp(12), dp(8))
+            layoutParams = LinearLayout.LayoutParams(-2, -2).apply { marginEnd = dp(8) }
+            setOnClickListener { onClick() }
+        }
+        if (decision != null) {
+            row.addView(btn("✓ Valider", cOk) { decide(m, decision, true) })
+            row.addView(btn("✕ Refuser", cCrit) { decide(m, decision, false) })
+        }
+        if (ticket != null) row.addView(btn("${ticket.groupValues[1]} ↗", cCyan) {
+            try { act.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(ticket.value))) } catch (e: Exception) { toast("Aucun navigateur") }
+        })
+        return row
+    }
+
+    /** Valider / refuser : réponse « valide [n] » ou « refuse [n] : raison » au message du pont. */
+    private fun decide(m: MatrixClient.Msg, issue: String, accept: Boolean) {
+        val count = m.decisionCount.coerceAtLeast(1)
+        val pick: (Int?) -> Unit = { n ->
+            if (accept) {
+                AlertDialog.Builder(act)
+                    .setTitle("Valider ${if (n != null) "la décision $n de " else ""}$issue ?")
+                    .setMessage("L'agent exécutera l'action demandée. La décision est tracée dans Wazuh et dans Paperclip.")
+                    .setPositiveButton("Valider") { _, _ -> sendDecision(m, issue, true, n, "") }
+                    .setNegativeButton("Annuler", null).show()
+            } else {
+                val reason = EditText(act).apply {
+                    hint = "Raison (facultative)"; setTextColor(cText); setHintTextColor(cMuted); setSingleLine()
+                }
+                val box = LinearLayout(act).apply { setPadding(dp(20), dp(8), dp(20), 0); addView(reason, LinearLayout.LayoutParams(-1, -2)) }
+                AlertDialog.Builder(act)
+                    .setTitle("Refuser ${if (n != null) "la décision $n de " else ""}$issue ?")
+                    .setView(box)
+                    .setPositiveButton("Refuser") { _, _ -> sendDecision(m, issue, false, n, reason.text.toString().trim()) }
+                    .setNegativeButton("Annuler", null).show()
+            }
+        }
+        if (count <= 1) pick(null)
+        else AlertDialog.Builder(act).setTitle("$issue : quelle décision ?")
+            .setItems(Array(count) { "Décision ${it + 1}" }) { _, i -> pick(i + 1) }
+            .setNegativeButton("Annuler", null).show()
+    }
+
+    private fun sendDecision(m: MatrixClient.Msg, issue: String, accept: Boolean, n: Int?, reason: String) {
+        val s = session ?: return
+        val text = buildString {
+            append(if (accept) "valide" else "refuse")
+            if (n != null) append(" ").append(n)
+            if (!accept && reason.isNotEmpty()) append(" : ").append(reason.replace('\n', ' ').take(400))
+        }
+        ui.launch {
+            try {
+                MatrixClient.send(s, text, emptyMap(), m.eventId)
+                audit("soc_decision decision=${if (accept) "approve" else "reject"} issue=$issue user=${s.userId}")
+                toast(if (accept) "Validation envoyée au pont" else "Refus envoyé au pont")
+            } catch (e: Exception) {
+                toast("Non envoyé : ${e.message ?: e.javaClass.simpleName}")
+            }
+        }
     }
 
     private fun actions(m: MatrixClient.Msg) {
@@ -349,6 +473,8 @@ class ChatPanel(
         ui.launch {
             try {
                 MatrixClient.send(s, text, mentions, rt?.eventId)
+                val to = mentions.keys.joinToString(",") { "@" + local(it) }.ifEmpty { "-" }
+                audit("soc to=$to reply=${if (rt != null) "yes" else "no"} len=${text.length} user=${s.userId}")
                 input.setText(""); setReply(null)
                 if (mentions.isEmpty() && rt == null) toast("Envoyé (aucun agent mentionné : pas de ticket)")
             } catch (e: MatrixClient.MxError) {

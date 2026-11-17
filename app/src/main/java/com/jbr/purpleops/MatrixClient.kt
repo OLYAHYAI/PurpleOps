@@ -51,6 +51,9 @@ object MatrixClient {
         val notice: Boolean,
         val replyTo: String?,
         val mentions: List<String>,
+        /** Notification « attend ta validation » du pont : ticket + nombre de décisions (boutons). */
+        val decisionIssue: String? = null,
+        val decisionCount: Int = 0,
     )
 
     data class SyncResult(val nextBatch: String, val messages: List<Msg>, val membersChanged: Boolean)
@@ -221,8 +224,10 @@ object MatrixClient {
         if (type != "m.text" && type != "m.notice" && type != "m.emote") body = "[${type.removePrefix("m.")}] $body"
         val mentions = c.optJSONObject("m.mentions")?.optJSONArray("user_ids")?.let { a -> (0 until a.length()).map { a.optString(it) } }
             ?: emptyList()
+        val dec = c.optJSONObject("fr.purpleops.decision")
+        val decIssue = dec?.optString("issue")?.takeIf { Regex("^[A-Z]+-\\d+$").matches(it) }
         return Msg(ev.optString("event_id"), ev.optString("sender"), ev.optLong("origin_server_ts"), body,
-            type == "m.notice", reply, mentions)
+            type == "m.notice", reply, mentions, decIssue, if (decIssue != null) (dec?.optInt("count", 1) ?: 1).coerceIn(1, 20) else 0)
     }
 
     /** Retire la citation « > <@x> … » ajoutée en tête des réponses par les clients historiques. */

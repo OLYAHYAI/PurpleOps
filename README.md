@@ -33,12 +33,16 @@ Format d'un preset :
 
 ## Chat SOC (#soc:maison, Matrix)
 
-Écran « Chat SOC » (raccourci `#` sur l'Accueil) : le même salon qu'Element X.
+Onglet **Chat** (à la place de Nikon, désormais raccourci de l'Accueil) : le même salon qu'Element X.
 
 - Connexion une fois avec un compte humain du SOC (`@lineageos` par défaut, ou `@f4blox` ; liste `owners` de `/etc/paperclip-matrix/room.json` sur la VM 122) : l'appli ouvre **sa propre session** (appareil « PurpleOps (téléphone) »), révocable seule (menu ⋮ › Déconnecter, ou depuis Element X). Le mot de passe n'est jamais stocké ; le jeton est chiffré par `SecureStore` (Keystore).
 - `@agent` (pastilles sous le fil ou saisie) pose `m.mentions` : le pont `matrix-soc-bridge` (VM 122) crée un ticket Paperclip `[Element X]` assigné à l'agent, qui répond dans le fil. Toucher un message = y répondre (répondre à un agent le sollicite aussi). `@paperclip tickets` = état des tickets.
 - Contexte : appui long sur une alerte de l'Accueil, ou bouton `→ #soc` dans Kali, ouvre le chat avec un message prérempli pour `@jbr` (modifiable avant envoi).
 - Périmètre volontairement réduit : un salon, texte seul, pas d'E2EE (salon non chiffré), synchronisation seulement écran affiché, aucune notification (Element X les garde). Les messages reçus sont affichés comme du texte brut (pas de lien cliquable, pas de HTML).
+- **Décisions** : quand un ticket attend ta validation, le pont liste les décisions en attente et l'appli affiche **✓ Valider / ✕ Refuser** sous son message (réponse « valide [n] » / « refuse [n] : raison », appliquée par le pont dans Paperclip). Bouton **JBR-xx ↗** pour ouvrir le ticket.
+- **Traçabilité** : chaque message (`cmd=soc …`, règle 100315) et chaque décision (`cmd=soc_decision …`, 100316) est écrit dans `purpleops-runs.log` (agent Wazuh 027). Côté pont : règles 100760-100765 (sollicitation, décision, compte non autorisé en niveau 10).
+- **Pastille** sur l'onglet Chat : mentions et décisions arrivées pendant que l'écran est fermé (vérification toutes les 60 s, appli au premier plan seulement).
+- Alertes de l'Accueil : le message prérempli contient l'identifiant de l'alerte, la règle, l'IP source et MITRE (soc-display ≥ 0.4.7).
 - Serveur : `https://chat.tail8a4866.ts.net` (Tuwunel, tailnet seul) : Tailscale doit être actif sur le téléphone.
 
 ## Build

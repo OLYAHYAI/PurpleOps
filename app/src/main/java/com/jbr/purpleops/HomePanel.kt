@@ -206,7 +206,7 @@ class HomePanel(
         tiles.addView(kpi("${m.crit}", "niveau ≥ 12", if (m.crit > 0) cCrit else cOk, last = true))
         c.addView(tiles)
         for (a in m.recent.take(3)) c.addView(alertRow(a.level, hhmm(a.ts), a.desc.ifBlank { a.agent }).apply {
-            setOnLongClickListener { askSoc(askText(a.level, a.desc, a.agent, hhmm(a.ts))); true }
+            setOnLongClickListener { askSoc(askText(a.level, a.desc, a.agent, hhmm(a.ts), a.id, a.ruleId, a.srcip, a.mitre)); true }
         })
         if (m.recent.isNotEmpty()) c.addView(note("Appui long sur une alerte : la soumettre à un agent dans #soc."))
         if (m.recent.isEmpty()) c.addView(note("Aucune alerte de niveau ≥ 10 récente."))
@@ -273,8 +273,9 @@ class HomePanel(
         val c = card()
         c.addView(label("Raccourcis"))
         val r = row()
-        val items = listOf(Triple("#", "Chat SOC", R.id.nav_chat), Triple("▣", "Écran USB", R.id.nav_screen),
-            Triple("◉", "Nikon", R.id.nav_camera), Triple(">_", "Kali", R.id.nav_kali))
+        // Nikon a quitté la barre du bas (remplacé par Chat) : il prend la première place ici.
+        val items = listOf(Triple("◉", "Nikon", R.id.nav_camera), Triple("▣", "Écran USB", R.id.nav_screen),
+            Triple(">_", "Kali", R.id.nav_kali))
         items.forEachIndexed { i, (g, t, id) ->
                 val b = LinearLayout(act).apply {
                     orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER
@@ -419,9 +420,21 @@ class HomePanel(
     }
 
     /** Message prérempli pour l'agent N1 (JBR) ; modifiable avant envoi. */
-    private fun askText(level: Int, desc: String, agent: String, t: String): String =
-        "@jbr analyse cette alerte Wazuh : « ${desc.take(300)} » (niveau $level" +
-            (if (agent.isNotBlank()) ", agent $agent" else "") + (if (t.isNotBlank()) ", $t" else "") + "). Vrai positif ? Action recommandée ?"
+    private fun askText(
+        level: Int, desc: String, agent: String, t: String,
+        id: String = "", ruleId: String = "", srcip: String = "", mitre: List<String> = emptyList(),
+    ): String {
+        val ctx = buildList {
+            if (ruleId.isNotBlank()) add("règle $ruleId")
+            add("niveau $level")
+            if (agent.isNotBlank()) add("agent $agent")
+            if (t.isNotBlank()) add(t)
+            if (srcip.isNotBlank()) add("source $srcip")
+            if (mitre.isNotEmpty()) add("MITRE ${mitre.joinToString(",")}")
+        }.joinToString(", ")
+        val ref = if (id.isNotBlank()) "l'alerte Wazuh $id" else "cette alerte Wazuh"
+        return "@jbr analyse $ref ($ctx) : « ${desc.take(300)} ». Vrai positif ? Action recommandée ?"
+    }
 
     private fun alertRow(level: Int, t: String, desc: String) = row().apply {
         setPadding(0, dp(7), 0, 0)

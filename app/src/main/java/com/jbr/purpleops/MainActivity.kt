@@ -101,7 +101,9 @@ class MainActivity : AppCompatActivity() {
         screen = try { ScreenPanel(this, viewScreen, ui) } catch (e: Exception) { null }
         try { McpPanel(this, viewSettings, ui) } catch (e: Exception) { }
         try { WolPanel(this, viewSettings, ui) } catch (e: Exception) { }
-        chat = try { ChatPanel(this, viewChat, ui) { showTab(R.id.nav_home); bottomNav.menu.findItem(R.id.nav_home)?.isChecked = true } } catch (e: Exception) { null }
+        chat = try {
+            ChatPanel(this, viewChat, ui, onUnread = { n -> setChatBadge(n) }, audit = { line -> ui.launch { RootRunner.logRun("${sysFmt.format(java.util.Date())} localhost purpleops: cmd=$line") } })
+        } catch (e: Exception) { null }
         home = try {
             HomePanel(this, viewHome, ui, { id -> openTab(id) }, { text -> askSoc(text) })
         } catch (e: Exception) { null }
@@ -110,7 +112,7 @@ class MainActivity : AppCompatActivity() {
         bindSettings()
 
         bottomNav.setOnItemSelectedListener { item -> showTab(item.itemId); true }
-        // Depuis le chat (sans onglet), l'item Accueil reste coché : le re-toucher doit y revenir.
+        // Depuis Nikon (sans onglet), l'item Accueil reste coché : le re-toucher doit y revenir.
         bottomNav.setOnItemReselectedListener { item -> if (currentTab != item.itemId) showTab(item.itemId) }
         showTab(R.id.nav_home)
 
@@ -119,7 +121,7 @@ class MainActivity : AppCompatActivity() {
         ui.launch { Updater.checkAndUpdate(applicationContext) { line -> appendLine(line) } }
     }
 
-    /** Onglet de la barre, ou écran sans onglet (chat #soc). */
+    /** Onglet de la barre, ou écran sans onglet (Nikon). */
     private fun openTab(id: Int) {
         if (bottomNav.menu.findItem(id) != null) bottomNav.selectedItemId = id else showTab(id)
     }
@@ -127,8 +129,27 @@ class MainActivity : AppCompatActivity() {
     /** Ouvre le chat #soc avec un message prérempli (alerte, sortie Kali…). */
     fun askSoc(text: String) {
         chat?.compose(text)
-        showTab(R.id.nav_chat)
+        openTab(R.id.nav_chat)
     }
+
+    /** Pastille sur l'onglet Chat : mentions et décisions arrivées hors de l'écran. */
+    private fun setChatBadge(n: Int) {
+        if (n <= 0) bottomNav.removeBadge(R.id.nav_chat)
+        else bottomNav.getOrCreateBadge(R.id.nav_chat).apply {
+            number = n
+            backgroundColor = ContextCompat.getColor(this@MainActivity, R.color.danger)
+        }
+    }
+
+    // Vérification légère du salon (sync sans attente) quand le chat n'est pas affiché,
+    // seulement appli au premier plan : alimente la pastille, aucun service en arrière-plan.
+    private val chatPeek = object : Runnable {
+        override fun run() {
+            if (currentTab != R.id.nav_chat) chat?.peek()
+            peekHandler.postDelayed(this, 60_000)
+        }
+    }
+    private val peekHandler = android.os.Handler(android.os.Looper.getMainLooper())
 
     private fun showTab(id: Int) {
         currentTab = id
@@ -225,7 +246,6 @@ class MainActivity : AppCompatActivity() {
 
     override fun onBackPressed() {
         if (currentTab == R.id.nav_kali && level != Level.CATEGORIES) goUp()
-        else if (currentTab == R.id.nav_chat) { showTab(R.id.nav_home); bottomNav.menu.findItem(R.id.nav_home)?.isChecked = true }
         else if (currentTab != R.id.nav_home) bottomNav.selectedItemId = R.id.nav_home
         else super.onBackPressed()
     }
@@ -493,11 +513,14 @@ class MainActivity : AppCompatActivity() {
         super.onResume()
         home?.setVisible(currentTab == R.id.nav_home)
         chat?.setVisible(currentTab == R.id.nav_chat)
+        peekHandler.removeCallbacks(chatPeek)
+        peekHandler.postDelayed(chatPeek, 3_000)
     }
 
     override fun onPause() {
         home?.setVisible(false)   // pas de rafraîchissement en arrière-plan
         chat?.setVisible(false)   // pas de /sync en arrière-plan
+        peekHandler.removeCallbacks(chatPeek)
         super.onPause()
     }
 
