@@ -33,6 +33,8 @@ class HomePanel(
     root: View,
     private val ui: CoroutineScope,
     private val openTab: (Int) -> Unit,
+    /** Ouvre le chat #soc avec un message prérempli (appui long sur une alerte). */
+    private val askSoc: (String) -> Unit = {},
 ) {
     private val content: LinearLayout = root.findViewById(R.id.homeContent)
     private val source: TextView = root.findViewById(R.id.homeSource)
@@ -203,7 +205,10 @@ class HomePanel(
         tiles.addView(kpi("${m.crit + m.high}", "niveau ≥ 10", if (m.crit + m.high > 0) cWarn else cOk))
         tiles.addView(kpi("${m.crit}", "niveau ≥ 12", if (m.crit > 0) cCrit else cOk, last = true))
         c.addView(tiles)
-        for (a in m.recent.take(3)) c.addView(alertRow(a.level, hhmm(a.ts), a.desc.ifBlank { a.agent }))
+        for (a in m.recent.take(3)) c.addView(alertRow(a.level, hhmm(a.ts), a.desc.ifBlank { a.agent }).apply {
+            setOnLongClickListener { askSoc(askText(a.level, a.desc, a.agent, hhmm(a.ts))); true }
+        })
+        if (m.recent.isNotEmpty()) c.addView(note("Appui long sur une alerte : la soumettre à un agent dans #soc."))
         if (m.recent.isEmpty()) c.addView(note("Aucune alerte de niveau ≥ 10 récente."))
         content.addView(c)
     }
@@ -213,7 +218,9 @@ class HomePanel(
         val c = card()
         c.addView(label("Alertes 24 h", "Wazuh direct"))
         c.addView(text("${s.alerts24h} alertes sur 24 h", 14f, cText))
-        for (a in s.alerts.take(3)) c.addView(alertRow(a.level, "", a.desc))
+        for (a in s.alerts.take(3)) c.addView(alertRow(a.level, "", a.desc).apply {
+            setOnLongClickListener { askSoc(askText(a.level, a.desc, a.agent, hhmm(a.ts))); true }
+        })
         content.addView(c)
     }
 
@@ -266,12 +273,13 @@ class HomePanel(
         val c = card()
         c.addView(label("Raccourcis"))
         val r = row()
-        listOf(Triple("▣", "Écran USB", R.id.nav_screen), Triple("◉", "Nikon", R.id.nav_camera), Triple(">_", "Catalogue Kali", R.id.nav_kali))
-            .forEachIndexed { i, (g, t, id) ->
+        val items = listOf(Triple("#", "Chat SOC", R.id.nav_chat), Triple("▣", "Écran USB", R.id.nav_screen),
+            Triple("◉", "Nikon", R.id.nav_camera), Triple(">_", "Kali", R.id.nav_kali))
+        items.forEachIndexed { i, (g, t, id) ->
                 val b = LinearLayout(act).apply {
                     orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER
                     setBackgroundResource(R.drawable.btn_neon); setPadding(dp(6), dp(10), dp(6), dp(10))
-                    layoutParams = LinearLayout.LayoutParams(0, -2, 1f).apply { if (i < 2) marginEnd = dp(8) }
+                    layoutParams = LinearLayout.LayoutParams(0, -2, 1f).apply { if (i < items.size - 1) marginEnd = dp(8) }
                     setOnClickListener { openTab(id) }
                 }
                 b.addView(text(g, 17f, cNeon, bold = true).apply { gravity = Gravity.CENTER })
@@ -409,6 +417,11 @@ class HomePanel(
         addView(text(v, 19f, color, bold = true))
         addView(text(l, 11f, cMuted))
     }
+
+    /** Message prérempli pour l'agent N1 (JBR) ; modifiable avant envoi. */
+    private fun askText(level: Int, desc: String, agent: String, t: String): String =
+        "@jbr analyse cette alerte Wazuh : « ${desc.take(300)} » (niveau $level" +
+            (if (agent.isNotBlank()) ", agent $agent" else "") + (if (t.isNotBlank()) ", $t" else "") + "). Vrai positif ? Action recommandée ?"
 
     private fun alertRow(level: Int, t: String, desc: String) = row().apply {
         setPadding(0, dp(7), 0, 0)
