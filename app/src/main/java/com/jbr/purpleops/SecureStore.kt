@@ -28,7 +28,7 @@ object SecureStore {
     private const val GCM_TAG_BITS = 128
 
     /** Clés de préférences qui contiennent un secret. */
-    val SECRET_KEYS = listOf("wz_api_pass", "wz_idx_pass")
+    val SECRET_KEYS = listOf("wz_api_pass", "wz_idx_pass", MatrixClient.P_TOKEN)
 
     private fun key(): SecretKey {
         val ks = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }

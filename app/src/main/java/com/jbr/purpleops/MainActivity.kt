@@ -39,6 +39,8 @@ class MainActivity : AppCompatActivity() {
     private lateinit var viewSettings: View
     private lateinit var viewCamera: View
     private lateinit var viewScreen: View
+    private lateinit var viewChat: View
+    private var chat: ChatPanel? = null
     private var camera: CameraPanel? = null
     private var screen: ScreenPanel? = null
     private var home: HomePanel? = null
@@ -92,23 +94,40 @@ class MainActivity : AppCompatActivity() {
         viewSettings = findViewById(R.id.viewSettings)
         viewCamera = findViewById(R.id.viewCamera)
         viewScreen = findViewById(R.id.viewScreen)
+        viewChat = findViewById(R.id.viewChat)
         // Une erreur dans la section caméra ne doit jamais empêcher l'appli
         // (et sa mise à jour automatique) de démarrer.
         camera = try { CameraPanel(this, viewCamera, ui) } catch (e: Exception) { null }
         screen = try { ScreenPanel(this, viewScreen, ui) } catch (e: Exception) { null }
         try { McpPanel(this, viewSettings, ui) } catch (e: Exception) { }
         try { WolPanel(this, viewSettings, ui) } catch (e: Exception) { }
-        home = try { HomePanel(this, viewHome, ui) { id -> bottomNav.selectedItemId = id } } catch (e: Exception) { null }
+        chat = try { ChatPanel(this, viewChat, ui) { showTab(R.id.nav_home); bottomNav.menu.findItem(R.id.nav_home)?.isChecked = true } } catch (e: Exception) { null }
+        home = try {
+            HomePanel(this, viewHome, ui, { id -> openTab(id) }, { text -> askSoc(text) })
+        } catch (e: Exception) { null }
 
         bindKali()
         bindSettings()
 
         bottomNav.setOnItemSelectedListener { item -> showTab(item.itemId); true }
+        // Depuis le chat (sans onglet), l'item Accueil reste coché : le re-toucher doit y revenir.
+        bottomNav.setOnItemReselectedListener { item -> if (currentTab != item.itemId) showTab(item.itemId) }
         showTab(R.id.nav_home)
 
         checkRoot()
         requestNotifPermission()
         ui.launch { Updater.checkAndUpdate(applicationContext) { line -> appendLine(line) } }
+    }
+
+    /** Onglet de la barre, ou écran sans onglet (chat #soc). */
+    private fun openTab(id: Int) {
+        if (bottomNav.menu.findItem(id) != null) bottomNav.selectedItemId = id else showTab(id)
+    }
+
+    /** Ouvre le chat #soc avec un message prérempli (alerte, sortie Kali…). */
+    fun askSoc(text: String) {
+        chat?.compose(text)
+        showTab(R.id.nav_chat)
     }
 
     private fun showTab(id: Int) {
@@ -120,6 +139,8 @@ class MainActivity : AppCompatActivity() {
         viewSettings.visibility = if (id == R.id.nav_settings) View.VISIBLE else View.GONE
         viewCamera.visibility = if (id == R.id.nav_camera) View.VISIBLE else View.GONE
         viewScreen.visibility = if (id == R.id.nav_screen) View.VISIBLE else View.GONE
+        viewChat.visibility = if (id == R.id.nav_chat) View.VISIBLE else View.GONE
+        chat?.setVisible(id == R.id.nav_chat)
         if (id == R.id.nav_screen) screen?.refreshPcs()
         home?.setVisible(id == R.id.nav_home)
         if (id == R.id.nav_alerts || id == R.id.nav_assets) refreshDashboard()
@@ -144,6 +165,8 @@ class MainActivity : AppCompatActivity() {
         runButton.setOnClickListener { runFree() }
         stopButton.setOnClickListener { RootRunner.stop(); appendLine("[stop demande]") }
         clearButton.setOnClickListener { console.text = "" }
+        // → #soc : soumettre la dernière commande et sa sortie à un agent (message modifiable avant envoi).
+        findViewById<View>(R.id.askSocButton).setOnClickListener { askSoc(kaliExcerpt()) }
         backBtn.setOnClickListener { goUp() }
 
         appendLine("PurpleOps v${BuildConfig.VERSION_NAME} (code ${BuildConfig.VERSION_CODE})")
@@ -202,6 +225,7 @@ class MainActivity : AppCompatActivity() {
 
     override fun onBackPressed() {
         if (currentTab == R.id.nav_kali && level != Level.CATEGORIES) goUp()
+        else if (currentTab == R.id.nav_chat) { showTab(R.id.nav_home); bottomNav.menu.findItem(R.id.nav_home)?.isChecked = true }
         else if (currentTab != R.id.nav_home) bottomNav.selectedItemId = R.id.nav_home
         else super.onBackPressed()
     }
@@ -276,6 +300,13 @@ class MainActivity : AppCompatActivity() {
             }
             appendLine("[termine, code $code]")
         }
+    }
+
+    private fun kaliExcerpt(): String {
+        val lines = console.text.toString().trimEnd().lines()
+        val start = lines.indexOfLast { it.startsWith("$ ") }.coerceAtLeast(0)
+        val tail = lines.drop(start).takeLast(25).joinToString("\n").take(2500)
+        return "@jbr résultat d'une commande PurpleOps (Kali, lab) à analyser :\n$tail"
     }
 
     private fun saveTarget(target: String) {
@@ -461,10 +492,12 @@ class MainActivity : AppCompatActivity() {
     override fun onResume() {
         super.onResume()
         home?.setVisible(currentTab == R.id.nav_home)
+        chat?.setVisible(currentTab == R.id.nav_chat)
     }
 
     override fun onPause() {
         home?.setVisible(false)   // pas de rafraîchissement en arrière-plan
+        chat?.setVisible(false)   // pas de /sync en arrière-plan
         super.onPause()
     }
 
