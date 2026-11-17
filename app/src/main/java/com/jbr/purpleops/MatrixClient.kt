@@ -16,8 +16,9 @@ import java.net.URLEncoder
  * n'est pas chiffré : les agents n'ont pas d'E2EE). API client-serveur v3 en
  * direct (login, filter, sync, joined_members, send, logout).
  *
- * Le pont `matrix-soc-bridge` (VM 122) ne traite que les messages de @f4blox :
- * l'appli ouvre donc une SESSION DÉDIÉE de ce compte (appareil « PurpleOps »),
+ * Le pont `matrix-soc-bridge` (VM 122) ne traite que les messages des humains de
+ * confiance (`owners` de room.json : @f4blox, @lineageos — compte du téléphone).
+ * L'appli ouvre une SESSION DÉDIÉE de ce compte (appareil « PurpleOps »),
  * révocable seule depuis Element X ou ici (DÉCONNECTER). Le mot de passe n'est
  * jamais stocké ; seul le jeton d'accès l'est, chiffré par SecureStore (Keystore).
  *
@@ -28,7 +29,7 @@ object MatrixClient {
 
     const val DEFAULT_HS = "https://chat.tail8a4866.ts.net"
     const val DEFAULT_ROOM = "#soc:maison"
-    const val DEFAULT_USER = "f4blox"
+    const val DEFAULT_USER = "lineageos"
     const val MAX_LEN = 4000
 
     private const val P_HS = "mx_hs"
