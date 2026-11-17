@@ -22,7 +22,11 @@ data class MNode(
     val name: String, val online: Boolean, val cpu: Double, val maxcpu: Int,
     val mem: Long, val maxmem: Long, val uptime: Long, val guestsRunning: Int, val guestsTotal: Int
 )
-data class MAlert(val ts: String?, val level: Int, val agent: String, val desc: String)
+data class MAlert(
+    val ts: String?, val level: Int, val agent: String, val desc: String,
+    // Contexte pour l'agent (soc-display >= 0.4.7) ; vides sur une version plus ancienne.
+    val id: String = "", val ruleId: String = "", val srcip: String = "", val mitre: List<String> = emptyList(),
+)
 data class MLink(val name: String, val state: Int)
 data class MTarget(val name: String, val lastMs: Double?)
 
@@ -110,7 +114,9 @@ object MetricsClient {
         } } } ?: emptyList()
         val al = j.optObj("alerts")
         val recent = al?.optJSONArray("recent")?.let { a -> (0 until a.length()).map { i -> a.getJSONObject(i).let {
-            MAlert(if (it.isNull("ts")) null else it.optString("ts"), it.optInt("level"), it.optString("agent"), it.optString("desc"))
+            MAlert(if (it.isNull("ts")) null else it.optString("ts"), it.optInt("level"), it.optString("agent"), it.optString("desc"),
+                id = it.optString("id"), ruleId = it.optString("rule_id"), srcip = it.optString("srcip"),
+                mitre = it.optJSONArray("mitre")?.let { m -> (0 until m.length()).map { k -> m.optString(k) }.filter { s -> s.isNotBlank() } } ?: emptyList())
         } } } ?: emptyList()
         val ag = j.optObj("agents")
         val en = j.optObj("energy")

@@ -4,6 +4,6 @@
          (alertes affichées sur l'Accueil) ; les vues restent dans le code. -->
     <item name="nav_assets" type="id" />
     <item name="nav_alerts" type="id" />
-    <!-- Chat SOC (#soc:maison) : ouvert depuis l'Accueil, sans onglet. -->
-    <item name="nav_chat" type="id" />
+    <!-- Nikon : plus d'onglet depuis le 17/11 (remplacé par Chat), ouvert depuis l'Accueil. -->
+    <item name="nav_camera" type="id" />
 </resources>
