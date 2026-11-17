@@ -81,3 +81,43 @@ si Tailscale est coupé, `kali-mcp-start.sh` refuse de démarrer et la raison s'
 ## Tests locaux (déjà passés en conteneur)
 Refus hors allowlist, refus injection cible, refus profil inconnu, fail-closed,
 refus bind public, `401` sans/mauvais token, `200` avec bon token.
+
+## Connexion sans câble (Tailscale direct) — exec **et** écran du téléphone
+
+Le serveur expose, sur le **même endpoint Tailscale**, à la fois `kali_exec`/`kali_status`
+et les outils d'écran `phone_*`. Pour piloter le téléphone **sans le garder branché au PC**,
+on connecte Claude directement au MCP du tel au lieu de passer par le bridge du PC :
+
+- **Endpoint** : `http://100.126.112.23:8765/mcp` (ou l'IP Tailscale courante du tel).
+  Avec `bind_host: "auto"`, le serveur se cale seul sur l'IP du tailnet.
+- **Auth** : en-tête `Authorization: Bearer <token>` (contenu de `/etc/purpleops-mcp/token`).
+- **Transport** : Streamable HTTP, chiffré par Tailscale/WireGuard (pas de TLS en plus).
+- **Écran** : nécessite, côté tel, PurpleOps → onglet **Écran** → « Autoriser le pilotage
+  par l'IA » (ouvre `screenctl.sock`). Indépendant du transport.
+
+Exemple d'entrée connecteur MCP (client Claude) :
+
+```json
+{
+  "purpleops-phone": {
+    "url": "http://100.126.112.23:8765/mcp",
+    "headers": { "Authorization": "Bearer REMPLACER_PAR_LE_TOKEN" }
+  }
+}
+```
+
+**Les deux options cohabitent** : le bridge du PC (USB) et la connexion Tailscale directe
+visent le même serveur ; on peut garder l'un, l'autre, ou les deux. Pré-requis sans câble :
+Tailscale up sur le tel + serveur MCP démarré (Réglages → Serveur MCP, ou case « démarrer
+automatiquement »).
+
+## Profils d'assessment (catalogue)
+
+Le catalogue figé vit dans **`profiles.yaml`** (versionné, livré par l'update), fusionné au
+démarrage avec les éventuels `profiles:` de `config.yaml` (ces derniers prioritaires). Zones
+couvertes : Recon (nmap quick/full/udp/scripts), DNS (dnsrecon, dig -x), Web (curl -I, whatweb,
+wafw00f, nikto), TLS/SSH (sslscan, ssh-audit), SMB (smbmap, nbtscan, enum4linux), SNMP
+(snmp-check, onesixtyone). **Assessment/énumération uniquement, jamais d'exploitation** —
+l'offensif lab (MITM/WiFi) reste hors de ce MCP, en override de presets + console libre.
+Ajouter une zone = éditer `profiles.yaml`, pousser, cliquer « Mettre à jour ». Les binaires
+absents du chroot échouent proprement (journalisé) ; les installer avec `apt install`.

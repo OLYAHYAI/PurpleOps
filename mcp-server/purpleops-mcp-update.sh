@@ -12,7 +12,7 @@ TMP="$(mktemp -d /tmp/po.XXXXXX)"
 trap 'rm -rf "$TMP"' EXIT
 
 echo "[maj] téléchargement depuis $RAW"
-for f in server.py requirements.txt kali-mcp-start.sh; do
+for f in server.py profiles.yaml requirements.txt kali-mcp-start.sh; do
   curl -fsSL "$RAW/$f" -o "$TMP/$f"
 done
 
@@ -27,6 +27,7 @@ if [ ! -f "$DEST/config.yaml" ]; then
 fi
 
 cp "$TMP/server.py"        "$DEST/server.py"
+cp "$TMP/profiles.yaml"    "$DEST/profiles.yaml"
 cp "$TMP/requirements.txt" "$DEST/requirements.txt"
 cp "$TMP/kali-mcp-start.sh" "$DEST/kali-mcp-start.sh"
 chmod +x "$DEST/kali-mcp-start.sh"

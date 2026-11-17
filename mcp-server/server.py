@@ -50,6 +50,7 @@ from starlette.responses import JSONResponse
 # --------------------------------------------------------------------------
 BASE_DIR = Path(__file__).resolve().parent
 CONFIG_PATH = Path(os.environ.get("PURPLEOPS_MCP_CONFIG", BASE_DIR / "config.yaml"))
+PROFILES_PATH = Path(os.environ.get("PURPLEOPS_MCP_PROFILES", BASE_DIR / "profiles.yaml"))
 
 # Jeton de sécurité (whitespace/token de contrôle rejeté) accepté sur /mcp.
 _SAFE_SUBST = re.compile(r"^[0-9A-Fa-f:.\-]+$")  # garde-fou défense en profondeur
@@ -61,7 +62,7 @@ def _load_config() -> dict[str, Any]:
         sys.exit(f"[FATAL] config introuvable : {CONFIG_PATH}")
     cfg = yaml.safe_load(CONFIG_PATH.read_text(encoding="utf-8")) or {}
     for key in ("bind_host", "bind_port", "token_file", "log_file", "kali_invoke",
-                "allowed_targets", "profiles"):
+                "allowed_targets"):
         if key not in cfg:
             sys.exit(f"[FATAL] clé de config manquante : {key}")
     return cfg
@@ -80,10 +81,24 @@ def _load_token(path: str) -> str:
     return token
 
 
+def _load_profiles(config: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    """Profils figés : catalogue versionné profiles.yaml, étendu/surchargé par les
+    éventuels `profiles:` de config.yaml (config.yaml prioritaire sur un même nom)."""
+    merged: dict[str, Any] = {}
+    if PROFILES_PATH.is_file():
+        data = yaml.safe_load(PROFILES_PATH.read_text(encoding="utf-8")) or {}
+        if isinstance(data, dict):
+            merged.update(data.get("profiles") or {})
+    merged.update(config.get("profiles") or {})
+    if not merged:
+        sys.exit("[FATAL] aucun profil chargé (ni profiles.yaml ni config.yaml:profiles)")
+    return merged
+
+
 CONFIG = _load_config()
 TOKEN = _load_token(CONFIG["token_file"])
 ALLOWED_NETS = [ipaddress.ip_network(c, strict=False) for c in CONFIG["allowed_targets"]]
-PROFILES: dict[str, dict[str, Any]] = CONFIG["profiles"]
+PROFILES: dict[str, dict[str, Any]] = _load_profiles(CONFIG)
 KALI_INVOKE: list[str] = list(CONFIG["kali_invoke"])
 LOG_PATH = Path(CONFIG["log_file"])
 _LOG_LOCK = threading.Lock()
@@ -103,6 +118,26 @@ def _assert_bind_is_private(host: str) -> None:
     # Tailscale = CGNAT 100.64.0.0/10 ; on tolère aussi le loopback (tests locaux).
     if not (ip in ipaddress.ip_network("100.64.0.0/10") or ip.is_loopback):
         sys.exit(f"[FATAL] bind_host {host} hors Tailscale/loopback : refusé.")
+
+
+def _resolve_bind_host(host: str) -> str:
+    """bind_host == "auto" -> première IP Tailscale (100.64.0.0/10) d'une interface
+    locale. Évite de coder en dur l'IP du tailnet (robustesse pour l'usage sans câble).
+    Le résultat repasse par _assert_bind_is_private, donc la garantie Tailscale-only
+    reste intacte."""
+    if host != "auto":
+        return host
+    try:
+        out = subprocess.run(["ip", "-4", "-o", "addr"], shell=False,
+                             capture_output=True, text=True, timeout=5).stdout
+    except Exception as exc:  # noqa: BLE001
+        sys.exit(f"[FATAL] bind_host=auto : lecture des interfaces impossible ({exc})")
+    ts_net = ipaddress.ip_network("100.64.0.0/10")
+    for m in re.finditer(r"\binet (\d+\.\d+\.\d+\.\d+)", out):
+        if ipaddress.ip_address(m.group(1)) in ts_net:
+            return m.group(1)
+    sys.exit("[FATAL] bind_host=auto : aucune IP Tailscale 100.64.0.0/10 trouvée "
+             "(Tailscale down ?).")
 
 
 # --------------------------------------------------------------------------
@@ -445,7 +480,7 @@ def build_app():
 
 
 def main() -> None:
-    host = str(CONFIG["bind_host"])
+    host = _resolve_bind_host(str(CONFIG["bind_host"]))
     port = int(CONFIG["bind_port"])
     _assert_bind_is_private(host)
     # garantit l'existence du log et teste le droit d'écriture AVANT d'écouter
