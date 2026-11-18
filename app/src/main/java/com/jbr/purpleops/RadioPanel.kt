@@ -50,6 +50,9 @@ class RadioPanel(private val act: AppCompatActivity, private val ui: CoroutineSc
         grid.addView(btn("Sniff 30 s") { run("sniff", "30") })
         grid.addView(btn("Kismet ON") { run("kismet-start", "") })
         grid.addView(btn("Kismet OFF") { confirm("Arrêter Kismet ?", "Le WIDS ne détectera plus pendant l'arrêt. Action auditée.") { run("kismet-stop", "") } })
+        grid.addView(label("— ESP32 (émetteur Red, série via le Pi) —"))
+        grid.addView(btn("Scan ESP") { run("esp-scan", "") })
+        grid.addView(btn("Statut ESP") { run("esp-status", "") })
         captureBtn = btn("Capture handshake…") { captureDialog() }
         deauthBtn = btn("Deauth-test (5 trames)…") { deauthDialog() }
         grid.addView(captureBtn); grid.addView(deauthBtn)

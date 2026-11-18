@@ -21,7 +21,7 @@ object RadioClient {
 
     const val DEFAULT_URL = "https://n8n-soar.tail8a4866.ts.net/webhook/wids-ctl"
     const val P_URL = "wids_webhook"
-    val ACTIONS = setOf("status", "sniff", "kismet-start", "kismet-stop", "capture-handshake", "deauth-test")
+    val ACTIONS = setOf("status", "sniff", "kismet-start", "kismet-stop", "capture-handshake", "deauth-test", "esp-ping", "esp-status", "esp-scan")
 
     private fun prefs(ctx: Context) = ctx.getSharedPreferences("purpleops", Context.MODE_PRIVATE)
     fun url(ctx: Context): String = prefs(ctx).getString(P_URL, DEFAULT_URL).orEmpty().ifBlank { DEFAULT_URL }
