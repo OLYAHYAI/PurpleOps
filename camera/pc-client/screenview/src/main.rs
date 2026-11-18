@@ -62,6 +62,12 @@ fn real_main() -> io::Result<()> {
             host = Some(a);
         }
     }
+    // Sans fil par défaut : sans hôte en argument, réutiliser le dernier hôte
+    // connecté (mémorisé) — typiquement l'IP Tailscale du téléphone. À défaut,
+    // on retombe sur la découverte USB plus bas.
+    if host.is_none() {
+        host = load_last_host();
+    }
     let key = load_or_create_key()?;
     let name = std::env::var("COMPUTERNAME").unwrap_or_else(|_| "PC".into());
     log(&format!("démarrage, PC {name}"));
@@ -102,6 +108,7 @@ fn real_main() -> io::Result<()> {
         match connect(&h, port, &key, &name) {
             Ok(Some(s)) => {
                 log(&format!("connecté à {h}:{port}"));
+                save_last_host(&h);
                 drop(wait);
                 let closed = match session(s, mbps) {
                     Ok(c) => c,
@@ -713,6 +720,19 @@ fn letter_key(k: Key) -> Option<u32> {
 
 fn app_dir() -> PathBuf {
     std::env::var_os("APPDATA").map(PathBuf::from).unwrap_or_else(|| PathBuf::from(".")).join("PurpleOps")
+}
+
+/// Dernier hôte connecté avec succès (mémorisé), pour le sans-fil par défaut.
+fn load_last_host() -> Option<String> {
+    std::fs::read_to_string(app_dir().join("host.txt"))
+        .ok()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+}
+
+fn save_last_host(host: &str) {
+    let _ = std::fs::create_dir_all(app_dir());
+    let _ = std::fs::write(app_dir().join("host.txt"), host);
 }
 
 /// Journal simple (la fenêtre n'a pas de console).
