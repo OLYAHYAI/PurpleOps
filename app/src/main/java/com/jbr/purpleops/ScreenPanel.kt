@@ -73,7 +73,7 @@ class ScreenPanel(
             }
         }
         // Sans câble : diffuse sur l'IP Tailscale au lieu de la carte réseau USB.
-        lan.isChecked = prefs.getBoolean("screen_lan", false)
+        lan.isChecked = prefs.getBoolean("screen_lan", true)
         lan.setOnCheckedChangeListener { _, on ->
             prefs.edit().putBoolean("screen_lan", on).apply()
             if (running) {
@@ -114,7 +114,10 @@ class ScreenPanel(
         running = false
         status.text = msg
         toggle.text = "ACTIVER"
-        info.text = "Branche le câble au PC puis ACTIVER.\nSur le PC : double-clic sur screenview.exe (Release GitHub)."
+        info.text = if (lan.isChecked)
+            "Sans câble (Tailscale) : ACTIVER, puis sur le PC double-clic sur screenview.exe (il se connecte seul au dernier téléphone)."
+        else
+            "Branche le câble au PC puis ACTIVER.\nSur le PC : double-clic sur screenview.exe (Release GitHub)."
     }
 
     private fun append(s: String) {
