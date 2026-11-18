@@ -44,6 +44,7 @@ class MainActivity : AppCompatActivity() {
     private var camera: CameraPanel? = null
     private var screen: ScreenPanel? = null
     private var home: HomePanel? = null
+    private var radio: RadioPanel? = null
     private lateinit var bottomNav: BottomNavigationView
     private var currentTab = R.id.nav_home
 
@@ -181,6 +182,10 @@ class MainActivity : AppCompatActivity() {
         console = findViewById(R.id.console)
         consoleScroll = findViewById(R.id.consoleScroll)
         rootChip = findViewById(R.id.rootChip)
+
+        // Écran radio (wol-pi) : contrôle du capteur WIDS via le webhook n8n.
+        radio = try { RadioPanel(this, ui) } catch (e: Exception) { null }
+        findViewById<View>(R.id.radioBtn).setOnClickListener { radio?.open() }
 
         targetInput.setText(getSharedPreferences("purpleops", MODE_PRIVATE).getString("target", ""))
         runButton.setOnClickListener { runFree() }
