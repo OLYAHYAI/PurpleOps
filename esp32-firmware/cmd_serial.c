@@ -32,8 +32,7 @@
 #include "esp_vfs_dev.h"
 
 #include "attack.h"
-#include "ap_scanner.h"
-#include "wifi_controller.h"
+#include "wifi_controller.h"   /* inclut transitivement ap_scanner.h (wifictl_ap_records_t, scan) */
 #include "webserver.h"
 
 #define PFX "#WIDS "
