@@ -1,0 +1,55 @@
+name: esp32-firmware
+
+# Build du firmware ESP32 "risinek + commande serie" (voir esp32-firmware/).
+# Les runners GitHub ont Internet -> ESP-IDF s'installe (toolchain Espressif),
+# contrairement au conteneur agent. Produit un .bin fusionne (flash offset 0x0).
+
+on:
+  push:
+    paths:
+      - 'esp32-firmware/**'
+      - '.github/workflows/esp32-firmware.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout (overlay)
+        uses: actions/checkout@v4
+
+      - name: Clone risinek (commit epingle)
+        run: |
+          git clone https://github.com/risinek/esp32-wifi-penetration-tool fw
+          git -C fw checkout e346e28ed9c93e98ab686c30eb8c4bc549313ba3
+
+      - name: Appliquer l'overlay commande serie
+        run: bash esp32-firmware/apply_overlay.sh fw
+
+      - name: Build ESP-IDF v4.1
+        uses: espressif/esp-idf-ci-action@v1
+        with:
+          esp_idf_version: v4.1
+          target: esp32
+          path: fw
+
+      - name: Fusionner le binaire (offset 0x0)
+        run: |
+          python -m pip install --quiet esptool
+          python -m esptool --chip esp32 merge_bin \
+            -o esp32-wids-serial-MERGED.bin \
+            --flash_mode dio --flash_freq 40m --flash_size 4MB \
+            0x1000  fw/build/bootloader/bootloader.bin \
+            0x8000  fw/build/partition_table/partition-table.bin \
+            0x10000 fw/build/esp32-wifi-penetration-tool.bin
+          ls -l esp32-wids-serial-MERGED.bin
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: esp32-wids-serial
+          path: esp32-wids-serial-MERGED.bin
+          if-no-files-found: error
