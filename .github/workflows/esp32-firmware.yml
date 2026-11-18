@@ -12,7 +12,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   build:
@@ -20,6 +20,8 @@ jobs:
     steps:
       - name: Checkout (overlay)
         uses: actions/checkout@v4
+        with:
+          persist-credentials: true
 
       - name: Clone risinek (commit epingle)
         run: |
@@ -53,3 +55,13 @@ jobs:
           name: esp32-wids-serial
           path: esp32-wids-serial-MERGED.bin
           if-no-files-found: error
+
+      - name: Commit bin to branch (recuperable par git fetch)
+        run: |
+          git config user.name "esp32-ci"
+          git config user.email "ci@local"
+          mkdir -p esp32-firmware/dist
+          cp esp32-wids-serial-MERGED.bin esp32-firmware/dist/esp32-wids-serial-MERGED.bin
+          git add -f esp32-firmware/dist/esp32-wids-serial-MERGED.bin
+          git commit -m "ci: build firmware esp32 serie [skip ci]"
+          git push origin HEAD:${GITHUB_REF_NAME}
