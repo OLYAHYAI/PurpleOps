@@ -39,4 +39,7 @@
     <style name="Widget.PurpleOps.NavIndicator" parent="Widget.Material3.BottomNavigationView.ActiveIndicator">
         <item name="android:color">#38A37BFF</item>
     </style>
+    <style name="TextAppearance.PurpleOps.NavLabel" parent="TextAppearance.Material3.LabelMedium">
+        <item name="android:textSize">11sp</item>
+    </style>
 </resources>

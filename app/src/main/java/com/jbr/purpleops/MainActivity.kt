@@ -71,6 +71,7 @@ class MainActivity : AppCompatActivity() {
     private val ansi = Regex("\\u001B\\[[0-9;]*[a-zA-Z]")
 
     private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
+    private val neon by lazy { Neon(this) }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -83,13 +84,20 @@ class MainActivity : AppCompatActivity() {
         ViewCompat.setOnApplyWindowInsetsListener(findViewById(R.id.rootLayout)) { _, insets ->
             val sb = insets.getInsets(WindowInsetsCompat.Type.systemBars())
             val ime = insets.getInsets(WindowInsetsCompat.Type.ime())
-            contentArea.setPadding(dp(12), sb.top + dp(6), dp(12), dp(6))
+            contentArea.setPadding(dp(16), sb.top + dp(8), dp(16), dp(6))
             // Barre flottante : la marge (et non le padding) absorbe la barre système,
             // pour que la pastille reste entière au-dessus des gestes.
             (bottomNav.layoutParams as ViewGroup.MarginLayoutParams).let { lp ->
                 val m = maxOf(sb.bottom, ime.bottom) + dp(10)
                 if (lp.bottomMargin != m) { lp.bottomMargin = m; bottomNav.layoutParams = lp }
             }
+            insets
+        }
+
+        // La barre M3 ajoute d'elle-même la hauteur de la barre de gestes en
+        // padding (doublon avec la marge ci-dessus) : on neutralise ce comportement.
+        ViewCompat.setOnApplyWindowInsetsListener(bottomNav) { v, insets ->
+            v.setPadding(0, 0, 0, 0)
             insets
         }
 
@@ -247,17 +255,19 @@ class MainActivity : AppCompatActivity() {
         when (level) {
             Level.CATEGORIES -> {
                 breadcrumb.text = "Catalogue"; backBtn.visibility = View.GONE
-                for (c in categories) addRow("▸  ${c.name}", "${c.tools.size} outil(s)") {
-                    curCat = c; level = Level.TOOLS; render()
+                categories.forEachIndexed { i, c ->
+                    addRow(c.name, c.tools.joinToString(" · ") { it.name }, String.format("%02d", i + 1)) {
+                        curCat = c; level = Level.TOOLS; render()
+                    }
                 }
             }
             Level.TOOLS -> {
                 breadcrumb.text = "Catalogue › ${curCat?.name}"; backBtn.visibility = View.VISIBLE
-                for (t in curCat!!.tools) addRow(t.name, t.desc) { curTool = t; level = Level.ACTIONS; render() }
+                curCat!!.tools.forEachIndexed { i, t -> addRow(t.name, t.desc, String.format("%02d", i + 1)) { curTool = t; level = Level.ACTIONS; render() } }
             }
             Level.ACTIONS -> {
                 breadcrumb.text = "Catalogue › ${curCat?.name} › ${curTool?.name}"; backBtn.visibility = View.VISIBLE
-                for (a in curTool!!.actions) addRow(a.label, a.cmd) { onAction(a) }
+                for (a in curTool!!.actions) addRow(a.label, a.cmd, "▶") { onAction(a) }
             }
         }
     }
@@ -276,38 +286,41 @@ class MainActivity : AppCompatActivity() {
         else super.onBackPressed()
     }
 
-    private fun addRow(title: String, subtitle: String?, onClick: () -> Unit) {
+    /** Ligne du catalogue Kali : pastille d'index, titre, sous-titre mono, chevron. */
+    private fun addRow(title: String, subtitle: String?, badge: String, onClick: () -> Unit) {
+        val n = neon
         val row = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setBackgroundResource(R.drawable.btn_neon)
-            setPadding(dp(14), dp(12), dp(14), dp(12))
-            isClickable = true
+            orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
+            setBackgroundResource(R.drawable.btn_tile)
+            setPadding(dp(12), dp(10), dp(14), dp(10))
+            minimumHeight = dp(56)
+            isClickable = true; isFocusable = true
             setOnClickListener { onClick() }
         }
         row.layoutParams = LinearLayout.LayoutParams(
             ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
-        ).apply { bottomMargin = dp(8) }
-        row.addView(TextView(this).apply { text = title; setTextColor(Color.parseColor("#E6EDF3")); textSize = 15f })
-        if (!subtitle.isNullOrBlank()) row.addView(TextView(this).apply {
-            text = subtitle; setTextColor(Color.parseColor("#8B98A6")); textSize = 11f; typeface = Typeface.MONOSPACE
+        ).apply { bottomMargin = dp(6) }
+        row.addView(n.monoText(badge, 11f, n.accentSoft, bold = true).apply {
+            gravity = Gravity.CENTER
+            background = android.graphics.drawable.GradientDrawable().apply { cornerRadius = n.dpf(9f); setColor(n.fade(n.accent, 0.14f)) }
+            layoutParams = LinearLayout.LayoutParams(dp(32), dp(32)).apply { marginEnd = dp(12) }
         })
+        val col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; layoutParams = LinearLayout.LayoutParams(0, -2, 1f) }
+        col.addView(n.text(title, 14.5f, n.text).apply { setTypeface(typeface, Typeface.BOLD) })
+        if (!subtitle.isNullOrBlank()) col.addView(n.ellipsize(n.monoText(subtitle, 11f, n.muted)))
+        row.addView(col)
+        row.addView(n.text("›", 18f, n.muted).apply { setPadding(dp(8), 0, 0, 0) })
         contentList.addView(row)
     }
 
+    /** Paramètres d'une action du catalogue : même feuille que les autres confirmations. */
     private fun onAction(a: ToolAction) {
         if (a.params.isEmpty()) { buildAndRun(a.cmd, emptyMap()); return }
-        val container = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(20), dp(8), dp(20), 0) }
-        val inputs = HashMap<String, EditText>()
-        for (p in a.params) {
-            container.addView(TextView(this).apply { text = p.hint; setTextColor(Color.parseColor("#8B98A6")); textSize = 12f })
-            val et = EditText(this).apply {
-                setText(p.def); setTextColor(Color.parseColor("#E6EDF3")); setHintTextColor(Color.parseColor("#8B98A6")); setSingleLine()
-            }
-            inputs[p.name] = et; container.addView(et)
-        }
-        AlertDialog.Builder(this).setTitle(a.label).setView(container)
-            .setPositiveButton("RUN") { _, _ -> buildAndRun(a.cmd, inputs.mapValues { it.value.text.toString().trim() }) }
-            .setNegativeButton("Annuler", null).show()
+        val sheet = ConfirmSheet(this, a.label, "RUN")
+            .kicker("${curTool?.name ?: "KALI"} · ${a.cmd.take(40)}")
+            .tone(ConfirmSheet.Tone.ACCENT)
+        for (p in a.params) sheet.field(p.name, p.hint, p.hint, initial = p.def)
+        sheet.show { values -> buildAndRun(a.cmd, values) }
     }
 
     private fun buildAndRun(template: String, params: Map<String, String>) {

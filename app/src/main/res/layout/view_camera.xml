@@ -1,50 +1,72 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Onglet Nikon : en-tête d'une ligne, puis la visée (page de p900ctl, façon appli
-     photo) sur toute la hauteur. Le journal et le relevé sont dans une vue à part. -->
+<!-- Nikon (Neon Ops) : en-tête « PTP/IP », puis la visée (page de p900ctl) dans un
+     cadre HUD sur toute la hauteur. Le journal et le relevé sont dans une vue à part. -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:orientation="vertical">
 
-    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
-        android:orientation="horizontal" android:gravity="center_vertical" android:paddingBottom="8dp">
-        <TextView android:id="@+id/camStatus" android:layout_width="0dp" android:layout_weight="1"
-            android:layout_height="wrap_content" android:text="—" android:textColor="@color/muted"
-            android:textSize="12sp" android:maxLines="2" android:ellipsize="end" />
-        <TextView android:id="@+id/camJournal" android:layout_width="wrap_content" android:layout_height="wrap_content"
-            android:background="@drawable/btn_neon" android:gravity="center"
-            android:paddingStart="14dp" android:paddingEnd="14dp" android:paddingTop="9dp" android:paddingBottom="9dp"
-            android:text="JOURNAL" android:textColor="@color/neon" android:textSize="12sp" android:layout_marginStart="8dp" />
-        <TextView android:id="@+id/camStart" android:layout_width="wrap_content" android:layout_height="wrap_content"
-            android:background="@drawable/btn_accent" android:gravity="center"
-            android:paddingStart="18dp" android:paddingEnd="18dp" android:paddingTop="9dp" android:paddingBottom="9dp"
-            android:text="VISÉE" android:textColor="@color/text" android:textStyle="bold" android:textSize="13sp"
-            android:layout_marginStart="8dp" />
-    </LinearLayout>
+    <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+        android:text="PTP/IP · P900CTL" android:textColor="@color/muted" android:textSize="11sp"
+        android:fontFamily="@font/jetbrains_mono" android:letterSpacing="0.12" />
+    <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+        android:text="Nikon" android:textColor="@color/text" android:textSize="22sp"
+        android:fontFamily="@font/space_grotesk" android:textStyle="bold" />
+    <TextView android:id="@+id/camStatus" android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:text="—" android:textColor="@color/muted" android:textSize="11.5sp" android:fontFamily="@font/jetbrains_mono"
+        android:maxLines="2" android:ellipsize="end" android:paddingTop="2dp" android:paddingBottom="12dp" />
 
     <FrameLayout android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1">
 
-        <!-- Visée -->
-        <TextView android:id="@+id/camEmpty" android:layout_width="match_parent" android:layout_height="match_parent"
-            android:gravity="center" android:padding="24dp" android:background="@drawable/tile"
-            android:textColor="@color/muted" android:textSize="14sp" android:lineSpacingExtra="4dp"
-            android:text="Connecte le téléphone au Wi-Fi « Nikon… » de l'appareil,\npuis appuie sur VISÉE." />
-        <WebView android:id="@+id/camWeb" android:layout_width="match_parent" android:layout_height="match_parent"
-            android:visibility="gone" />
+        <!-- Visée dans un cadre HUD -->
+        <FrameLayout android:id="@+id/camFrame" android:layout_width="match_parent" android:layout_height="match_parent"
+            android:background="@drawable/bg_viewfinder" android:padding="1dp">
+            <TextView android:id="@+id/camEmpty" android:layout_width="match_parent" android:layout_height="match_parent"
+                android:gravity="center" android:padding="40dp"
+                android:textColor="@color/text_soft" android:textSize="14sp" android:lineSpacingExtra="4dp"
+                android:drawableTop="@drawable/ic_camera" android:drawableTint="@color/accent_soft" android:drawablePadding="12dp"
+                android:text="Connecte le téléphone au Wi-Fi « Nikon… » de l'appareil, puis appuie sur Visée." />
+            <WebView android:id="@+id/camWeb" android:layout_width="match_parent" android:layout_height="match_parent"
+                android:visibility="gone" />
+            <ImageView android:layout_width="22dp" android:layout_height="22dp" android:layout_gravity="top|start"
+                android:layout_margin="12dp" android:src="@drawable/ic_corner" android:importantForAccessibility="no" />
+            <ImageView android:layout_width="22dp" android:layout_height="22dp" android:layout_gravity="top|end"
+                android:layout_margin="12dp" android:src="@drawable/ic_corner" android:rotation="90" android:importantForAccessibility="no" />
+            <ImageView android:layout_width="22dp" android:layout_height="22dp" android:layout_gravity="bottom|end"
+                android:layout_margin="12dp" android:src="@drawable/ic_corner" android:rotation="180" android:importantForAccessibility="no" />
+            <ImageView android:layout_width="22dp" android:layout_height="22dp" android:layout_gravity="bottom|start"
+                android:layout_margin="12dp" android:src="@drawable/ic_corner" android:rotation="270" android:importantForAccessibility="no" />
+        </FrameLayout>
 
         <!-- Journal (diagnostic) -->
         <LinearLayout android:id="@+id/camJournalView" android:layout_width="match_parent" android:layout_height="match_parent"
-            android:orientation="vertical" android:visibility="gone">
+            android:orientation="vertical" android:visibility="gone" android:background="@color/bg">
             <TextView android:id="@+id/camProbe" android:layout_width="match_parent" android:layout_height="wrap_content"
-                android:background="@drawable/btn_neon" android:gravity="center" android:paddingTop="10dp" android:paddingBottom="10dp"
-                android:text="TESTER LA CONNEXION (relevé de l'appareil)" android:textColor="@color/neon" android:textSize="13sp"
-                android:layout_marginBottom="8dp" />
-            <ScrollView android:id="@+id/camLogScroll" android:layout_width="match_parent" android:layout_height="0dp"
-                android:layout_weight="1" android:background="@drawable/bg_console" android:padding="10dp">
-                <TextView android:id="@+id/camLog" android:layout_width="match_parent" android:layout_height="wrap_content"
-                    android:fontFamily="monospace" android:textSize="11sp" android:textColor="@color/console_text"
-                    android:textIsSelectable="true" />
-            </ScrollView>
+                android:background="@drawable/btn_ghost" android:gravity="center" android:minHeight="46dp"
+                android:text="Tester la connexion (relevé de l'appareil)" android:textColor="@color/text_soft" android:textStyle="bold"
+                android:textSize="13sp" android:layout_marginBottom="10dp" />
+            <LinearLayout android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1"
+                android:orientation="vertical" android:background="@drawable/bg_console">
+                <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="JOURNAL"
+                    android:textColor="@color/muted" android:textSize="11sp" android:fontFamily="@font/jetbrains_mono" android:letterSpacing="0.12"
+                    android:paddingStart="12dp" android:paddingTop="8dp" android:paddingEnd="12dp" android:paddingBottom="4dp" />
+                <ScrollView android:id="@+id/camLogScroll" android:layout_width="match_parent" android:layout_height="0dp"
+                    android:layout_weight="1" android:paddingStart="12dp" android:paddingEnd="12dp" android:paddingBottom="10dp">
+                    <TextView android:id="@+id/camLog" android:layout_width="match_parent" android:layout_height="wrap_content"
+                        android:fontFamily="@font/jetbrains_mono" android:textSize="11sp" android:textColor="@color/console_text"
+                        android:textIsSelectable="true" />
+                </ScrollView>
+            </LinearLayout>
         </LinearLayout>
     </FrameLayout>
+
+    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:orientation="horizontal" android:paddingTop="12dp">
+        <TextView android:id="@+id/camStart" android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content"
+            android:background="@drawable/btn_accent" android:gravity="center" android:minHeight="52dp"
+            android:text="VISÉE" android:textColor="@color/bg" android:textStyle="bold" android:textSize="15sp" android:layout_marginEnd="8dp" />
+        <TextView android:id="@+id/camJournal" android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content"
+            android:background="@drawable/btn_neon" android:gravity="center" android:minHeight="52dp"
+            android:text="JOURNAL" android:textColor="@color/accent_on" android:textStyle="bold" android:textSize="15sp" />
+    </LinearLayout>
 </LinearLayout>

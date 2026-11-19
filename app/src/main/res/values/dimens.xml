@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources xmlns:tools="http://schemas.android.com/tools">
+    <!-- Barre du bas flottante plus compacte que le défaut M3 (80 dp). -->
+    <dimen name="m3_bottom_nav_min_height" tools:override="true">64dp</dimen>
+</resources>

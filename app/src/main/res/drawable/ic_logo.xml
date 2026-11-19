@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Logo « Neon Ops » : hexagone contour + noyau plein. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android" android:width="32dp" android:height="32dp" android:viewportWidth="32" android:viewportHeight="32">
+    <path android:strokeColor="#A37BFF" android:strokeWidth="1.6" android:fillColor="#00000000" android:strokeLineJoin="round"
+        android:pathData="M16,2L28,9L28,23L16,30L4,23L4,9Z" />
+    <path android:fillColor="#D9A37BFF" android:pathData="M16,9L22,12.5L22,19.5L16,23L10,19.5L10,12.5Z" />
+</vector>

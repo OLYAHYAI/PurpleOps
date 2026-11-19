@@ -39,6 +39,12 @@ class HomePanel(
     private val content: LinearLayout = root.findViewById(R.id.homeContent)
     private val source: TextView = root.findViewById(R.id.homeSource)
 
+    init {
+        root.findViewById<TextView>(R.id.homeKicker).text = "SOC · MAISON · v${BuildConfig.VERSION_NAME}"
+    }
+
+    private val n = Neon(act)
+
     // Couleurs d'état alignées sur soc-display (D4)
     private val cOk = Color.parseColor("#2ECC71")
     private val cWarn = Color.parseColor("#F5A524")
@@ -90,17 +96,18 @@ class HomePanel(
         }
     }
 
-    // ------------------------------------------------------------ rendu
+    // ------------------------------------------------------------ rendu (« Neon Ops »)
 
     private fun render() {
         content.removeAllViews()
         val m = metrics
         source.text = when {
-            m != null -> "soc-display · ${age(m.collectedAt)}"
-            loading -> "chargement…"
-            else -> "vue réduite"
+            m != null -> "SOC-DISPLAY · ${age(m.collectedAt).uppercase()}"
+            loading -> "CHARGEMENT…"
+            else -> "VUE RÉDUITE"
         }
-        source.setTextColor(if (m != null) cMuted else cWarn)
+        source.setBackgroundResource(if (m != null) R.drawable.chip_ok else R.drawable.chip_warn)
+        source.setTextColor(ContextCompat.getColor(act, if (m != null) R.color.ok_soft else R.color.warn_soft))
         hero(m)
         energy(m)
         if (m != null) { soar(m); alerts(m); mitre(m); net(m) } else {
@@ -111,156 +118,199 @@ class HomePanel(
         shortcuts()
     }
 
+    /** Carte « Posture SOC » : jauge circulaire + indicateurs clés. */
     private fun hero(m: Metrics?) {
-        val c = card(R.drawable.hero)
-        c.addView(label("État du SOC"))
-        val (txt, col, why) = when {
-            m != null -> Triple(m.levelText.ifBlank { "—" }, levelColor(m.level),
-                if (m.reasons.isEmpty()) "tous les indicateurs sont au vert" else m.reasons.joinToString(" · "))
-            wz != null -> Triple(wz!!.statusLabel, if (wz!!.statusLabel == "Protégé") cOk else if (wz!!.statusLabel == "Attention") cWarn else cCrit,
-                "Wazuh en direct (score ${wz!!.score})")
-            loading -> Triple("…", cMuted, "chargement")
-            else -> Triple("HORS LIGNE", cCrit, "ni soc-display ni Wazuh ne répondent : nœuds éteints ? Bloc Énergie ci-dessous.")
+        val c = n.card(R.drawable.hero, 16, 16)
+        val r = n.row()
+        val (txt, col, why, frac) = when {
+            m != null -> Quad(m.levelText.ifBlank { "—" }, levelColor(m.level),
+                if (m.reasons.isEmpty()) "tous les indicateurs sont au vert" else m.reasons.joinToString(" · "),
+                when (m.level) { 0 -> 0.25f; 1 -> 0.6f; else -> 0.95f })
+            wz != null -> Quad(wz!!.statusLabel, if (wz!!.statusLabel == "Protégé") cOk else if (wz!!.statusLabel == "Attention") cWarn else cCrit,
+                "Wazuh en direct · score ${wz!!.score}", (wz!!.score / 100f))
+            loading -> Quad("…", cMuted, "chargement", 0f)
+            else -> Quad("HORS LIGNE", cCrit, "ni soc-display ni Wazuh ne répondent : nœuds éteints ? Bloc Énergie ci-dessous.", 1f)
         }
-        c.addView(text(txt, 26f, col, bold = true))
-        c.addView(text(why, 12.5f, cMuted).apply { setPadding(0, dp(2), 0, 0) })
+        // Jauge
+        val g = android.widget.FrameLayout(act).apply { layoutParams = LinearLayout.LayoutParams(n.dp(112), n.dp(112)).apply { marginEnd = n.dp(14) } }
+        g.addView(GaugeView(act).apply { fraction = frac; color = col; layoutParams = android.widget.FrameLayout.LayoutParams(-1, -1) })
+        val center = LinearLayout(act).apply {
+            orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER
+            layoutParams = android.widget.FrameLayout.LayoutParams(-1, -1)
+        }
+        center.addView(n.title(if (m != null) "${m.crit + m.high}" else if (wz != null) "${wz!!.score}" else "—", 28f, n.text).apply { gravity = Gravity.CENTER })
+        center.addView(n.monoText(if (m != null) "≥10 · 24 H" else if (wz != null) "SCORE" else "", 9.5f, n.accentSoft).apply { gravity = Gravity.CENTER; letterSpacing = 0.1f })
+        g.addView(center)
+        r.addView(g)
+        // Indicateurs
+        val col2 = n.column().apply { layoutParams = n.weight() }
+        col2.addView(n.kicker("Posture SOC"))
+        col2.addView(n.title(txt, 22f, n.lighten(col)).apply { setPadding(0, n.dp(2), 0, n.dp(6)) })
         if (m != null) {
-            val chips = row().apply { setPadding(0, dp(10), 0, 0) }
-            m.quorate?.let { chips.addView(chip(if (it) "Quorum OK" else "Quorum PERDU", if (it) cOk else cCrit)) }
-            chips.addView(chip("Alertes ≥10 : ${m.crit + m.high} (24 h)", if (m.crit + m.high > 0) cWarn else cOk))
-            if (m.crit > 0) chips.addView(chip("≥12 : ${m.crit}", cCrit))
-            c.addView(chips)
+            col2.addView(kv("Alertes ≥10 · 24 h", "${m.crit + m.high}", if (m.crit + m.high > 0) cWarn else cOk))
+            col2.addView(kv("Niveau ≥12 · 24 h", "${m.crit}", if (m.crit > 0) cCrit else cOk))
+            m.quorate?.let { col2.addView(kv("Quorum cluster", if (it) "OK" else "PERDU", if (it) cOk else cCrit)) }
+        } else if (wz != null) {
+            col2.addView(kv("Alertes · 24 h", "${wz!!.alerts24h}", cText))
+            col2.addView(kv("Agents actifs", "${wz!!.active}/${wz!!.total}", if (wz!!.active == wz!!.total) cOk else cWarn))
         }
+        r.addView(col2)
+        c.addView(r)
+        c.addView(n.text(why, 12f, n.soft).apply { setPadding(0, n.dp(10), 0, 0) })
         content.addView(c)
     }
 
+    private data class Quad(val a: String, val b: Int, val c: String, val d: Float)
+
+    private fun kv(k: String, v: String, color: Int) = n.row().apply {
+        setPadding(0, n.dp(3), 0, n.dp(3))
+        addView(n.text(k, 12.5f, n.soft).apply { layoutParams = n.weight() })
+        addView(n.monoText(v, 14f, n.lighten(color), bold = true))
+    }
+
     private fun energy(m: Metrics?) {
-        val c = card()
-        val right = m?.powerW?.let { "${it.toInt()} W" + (m.dayAvgW?.let { a -> " · moy. ${a.toInt()} W" } ?: "") } ?: ""
-        c.addView(label("Nœuds & énergie", right))
+        val right = m?.powerW?.let { "${it.toInt()} W" + (m.dayAvgW?.let { a -> " · moy. ${a.toInt()} W" } ?: "") } ?: "wol-pi"
+        content.addView(n.section("Nœuds & énergie", right))
         var anyNotUp = false
-        for (n in Cluster.NODES) {
-            val mn = if (n.inCluster) m?.nodes?.firstOrNull { it.name.equals(n.pveName, true) } else m?.pbs
-            val up: Boolean? = mn?.online ?: probe[n.target]
-            if (up != true && n.inCluster) anyNotUp = true
-            val box = LinearLayout(act).apply {
-                orientation = LinearLayout.VERTICAL
-                setBackgroundResource(R.drawable.tile)
-                setPadding(dp(12), dp(10), dp(12), dp(10))
-                if (up != true) alpha = 0.85f
-            }
-            box.layoutParams = lp().apply { bottomMargin = dp(8) }
-            val head = row()
-            head.addView(dot(when (up) { true -> cOk; false -> cMuted; null -> cMuted }))
-            head.addView(text(n.pveName, 15f, cText, bold = true).apply { setPadding(dp(8), 0, dp(8), 0) })
-            head.addView(text(n.role, 11.5f, cMuted).apply { layoutParams = LinearLayout.LayoutParams(0, -2, 1f); maxLines = 1; ellipsize = TextUtils.TruncateAt.END })
-            head.addView(text(when { mn != null && mn.online -> upt(mn.uptime); up == true -> "en ligne"; up == false -> if (n.inCluster) "éteint / injoignable" else "en veille"; else -> "…" }, 11.5f, cMuted))
+        for (nd in Cluster.NODES) {
+            val mn = if (nd.inCluster) m?.nodes?.firstOrNull { it.name.equals(nd.pveName, true) } else m?.pbs
+            val up: Boolean? = mn?.online ?: probe[nd.target]
+            if (up != true && nd.inCluster) anyNotUp = true
+            val box = n.card(if (up == true) R.drawable.card else R.drawable.card_off, 14, 12)
+            val head = n.row()
+            head.addView(if (up == true) n.dot(cOk, 8) else n.dot(n.faint, 8, hollow = true))
+            head.addView(n.monoText(nd.pveName, 14f, if (up == true) cText else n.soft, bold = true).apply { setPadding(n.dp(8), 0, n.dp(8), 0) })
+            head.addView(n.ellipsize(n.text(nd.role, 11.5f, cMuted)).apply { layoutParams = n.weight() })
+            if (up == true) head.addView(n.button(if (nd.inCluster) "Proxmox ↗" else "PBS ↗", Neon.Kind.SECONDARY) { openUrl(Cluster.proxmoxUrl(nd)) }.apply { minHeight = n.dp(34); textSize = 12f; setPadding(n.dp(12), n.dp(4), n.dp(12), n.dp(4)) })
+            else head.addView(n.button("⏻ Allumer", Neon.Kind.SECONDARY) { confirmWake(listOf(nd)) }.apply { minHeight = n.dp(34); textSize = 12f; setPadding(n.dp(12), n.dp(4), n.dp(12), n.dp(4)) })
             box.addView(head)
             if (mn != null && mn.online) {
-                box.addView(barRow("CPU", mn.cpu, "${(mn.cpu * 100).toInt()} %"))
-                box.addView(barRow("RAM", if (mn.maxmem > 0) mn.mem.toDouble() / mn.maxmem else 0.0, "${gib(mn.mem)}/${gib(mn.maxmem)} Go"))
+                box.addView(barRow("CPU", mn.cpu, "${(mn.cpu * 100).toInt()} %", if (mn.cpu > 0.8) cWarn else cNeon))
+                box.addView(barRow("RAM", if (mn.maxmem > 0) mn.mem.toDouble() / mn.maxmem else 0.0, "${gib(mn.mem)}/${gib(mn.maxmem)} Go", cInfo))
             }
-            val foot = row().apply { setPadding(0, dp(8), 0, 0) }
-            foot.addView(text(
-                wakeStatus[n.target] ?: when {
-                    !n.inCluster && up == true -> "Proxmox Backup Server · :${n.port}"
-                    mn != null && mn.online -> "${mn.guestsRunning}/${mn.guestsTotal} invités en marche"
-                    else -> "réveil via wol-pi (${n.via})"
-                },
-                11.5f, if (wakeStatus[n.target] != null) cInfo else cMuted
-            ).apply { layoutParams = LinearLayout.LayoutParams(0, -2, 1f) })
-            if (up == true) foot.addView(button(if (n.inCluster) "Proxmox ↗" else "PBS ↗", primary = false) { openUrl(Cluster.proxmoxUrl(n)) })
-            else foot.addView(button("Allumer", primary = true) { confirmWake(listOf(n)) })
-            box.addView(foot)
-            c.addView(box)
+            val status = wakeStatus[nd.target] ?: when {
+                mn != null && mn.online -> "${upt(mn.uptime)} · ${mn.guestsRunning}/${mn.guestsTotal} invités"
+                !nd.inCluster && up == true -> "Proxmox Backup Server · :${nd.port}"
+                up == true -> "en ligne"
+                up == false -> (if (nd.inCluster) "éteint" else "en veille") + " · réveil via wol-pi (${nd.via})"
+                else -> "…"
+            }
+            box.addView(n.monoText(status, 11f, if (wakeStatus[nd.target] != null) cInfo else cMuted).apply { setPadding(0, n.dp(8), 0, 0) })
+            content.addView(box)
         }
-        if (anyNotUp) c.addView(button("Tout allumer", primary = true) { confirmWake(Cluster.CLUSTER) }.apply {
-            layoutParams = lp().apply { topMargin = dp(2) }; gravity = Gravity.CENTER
+        if (anyNotUp) content.addView(n.button("⏻ Tout allumer", Neon.Kind.PRIMARY) { confirmWake(Cluster.CLUSTER) }.apply {
+            layoutParams = n.lp().apply { topMargin = n.dp(2); bottomMargin = n.dp(4) }; minHeight = n.dp(46)
         })
-        c.addView(note("Allumer : wol-pi (audit Wazuh 100721+) · Éteindre : interface Proxmox du nœud (↗)."))
-        content.addView(c)
+        content.addView(note("Allumer : wol-pi (audit Wazuh 100721+) · Éteindre : interface Proxmox du nœud (↗)."))
     }
 
     private fun soar(m: Metrics) {
         if (m.chain.isEmpty()) return
-        val c = card()
-        c.addView(label("Chaîne SOAR", "24 h : ${fmt(m.total24h)} → n8n ${fmt(m.n8n24h)} → IA ${m.ia24h}"))
-        val r = row().apply { gravity = Gravity.CENTER_VERTICAL }
+        content.addView(n.section("Chaîne SOAR · 24 h", m.chain.joinToString(" · ") { it.name }.take(40),
+            if (m.chain.all { it.state == 0 }) cOk else cWarn))
+        val c = n.card()
+        val max = maxOf(1L, m.total24h).toDouble()
+        c.addView(funnel("Événements", m.total24h, 1.0, cInfo))
+        c.addView(funnel("→ n8n", m.n8n24h, m.n8n24h / max, cNeon))
+        c.addView(funnel("→ IA", m.ia24h, m.ia24h / max, cWarn))
+        // Maillons : un point d'état par composant
+        val r = n.row().apply { setPadding(0, n.dp(10), 0, 0) }
         m.chain.forEachIndexed { i, l ->
-            if (i > 0) r.addView(text("→", 12f, cMuted).apply { layoutParams = LinearLayout.LayoutParams(0, -2, 0.4f); gravity = Gravity.CENTER })
-            val col = LinearLayout(act).apply { orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER_HORIZONTAL; layoutParams = LinearLayout.LayoutParams(0, -2, 1f) }
-            col.addView(dot(when (l.state) { 0 -> cOk; 1 -> cWarn; 2 -> cCrit; else -> cMuted }, 12))
-            col.addView(text(l.name, 11.5f, cText).apply { gravity = Gravity.CENTER; setPadding(0, dp(4), 0, 0) })
-            r.addView(col)
+            if (i > 0) r.addView(View(act).apply {
+                setBackgroundColor(n.border); layoutParams = LinearLayout.LayoutParams(0, n.dp(1), 0.5f)
+            })
+            val colv = LinearLayout(act).apply { orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER_HORIZONTAL }
+            colv.addView(n.dot(when (l.state) { 0 -> cOk; 1 -> cWarn; 2 -> cCrit; else -> cMuted }, 9))
+            colv.addView(n.monoText(l.name, 10.5f, n.soft).apply { gravity = Gravity.CENTER; setPadding(0, n.dp(4), 0, 0) })
+            r.addView(colv)
         }
         c.addView(r)
         content.addView(c)
     }
 
+    private fun funnel(name: String, v: Long, frac: Double, color: Int) = n.row().apply {
+        setPadding(0, n.dp(4), 0, n.dp(4))
+        addView(n.text(name, 12f, n.soft).apply { layoutParams = LinearLayout.LayoutParams(n.dp(86), -2) })
+        addView(n.bar(frac.coerceAtLeast(0.02), color, 10).apply { layoutParams = LinearLayout.LayoutParams(0, n.dp(10), 1f) })
+        addView(n.monoText(fmt(v), 12f, cText).apply { layoutParams = LinearLayout.LayoutParams(n.dp(64), -2); gravity = Gravity.END })
+    }
+
     private fun alerts(m: Metrics) {
-        val c = card()
-        c.addView(label("Alertes 24 h"))
-        val tiles = row()
+        content.addView(n.section("Alertes · 24 h", "${fmt(m.total24h)} reçues"))
+        val tiles = n.row().apply { layoutParams = n.lp().apply { bottomMargin = n.dp(8) } }
         tiles.addView(kpi(fmt(m.total24h), "reçues", cText))
         tiles.addView(kpi("${m.crit + m.high}", "niveau ≥ 10", if (m.crit + m.high > 0) cWarn else cOk))
         tiles.addView(kpi("${m.crit}", "niveau ≥ 12", if (m.crit > 0) cCrit else cOk, last = true))
-        c.addView(tiles)
-        for (a in m.recent.take(3)) c.addView(alertRow(a.level, hhmm(a.ts), a.desc.ifBlank { a.agent }).apply {
+        content.addView(tiles)
+        for (a in m.recent.take(3)) content.addView(alertRow(a.level, hhmm(a.ts), a.desc.ifBlank { a.agent },
+            listOfNotNull(a.agent.takeIf { it.isNotBlank() }, a.ruleId.takeIf { it.isNotBlank() }?.let { "règle $it" }, a.mitre.firstOrNull()).joinToString(" · ")).apply {
             setOnLongClickListener { askSoc(askText(a.level, a.desc, a.agent, hhmm(a.ts), a.id, a.ruleId, a.srcip, a.mitre)); true }
         })
-        if (m.recent.isNotEmpty()) c.addView(note("Appui long sur une alerte : la soumettre à un agent dans #soc."))
-        if (m.recent.isEmpty()) c.addView(note("Aucune alerte de niveau ≥ 10 récente."))
-        content.addView(c)
+        content.addView(note(if (m.recent.isEmpty()) "Aucune alerte de niveau ≥ 10 récente." else "Appui long sur une alerte : la soumettre à un agent dans #soc."))
     }
 
     private fun alertsFallback() {
         val s = wz ?: return
-        val c = card()
-        c.addView(label("Alertes 24 h", "Wazuh direct"))
-        c.addView(text("${s.alerts24h} alertes sur 24 h", 14f, cText))
-        for (a in s.alerts.take(3)) c.addView(alertRow(a.level, "", a.desc).apply {
+        content.addView(n.section("Alertes · 24 h", "Wazuh direct · ${s.alerts24h}", cWarn))
+        for (a in s.alerts.take(3)) content.addView(alertRow(a.level, hhmm(a.ts), a.desc, a.agent).apply {
             setOnLongClickListener { askSoc(askText(a.level, a.desc, a.agent, hhmm(a.ts))); true }
         })
-        content.addView(c)
     }
 
+    /** Bande MITRE : une case par tactique, les angles morts en pointillés rouges. */
     private fun mitre(m: Metrics) {
-        val c = card()
-        c.addView(label("MITRE ATT&CK · 7 j", "${m.mitreCovered}/${m.mitreTotal} tactiques"))
-        c.addView(bar(if (m.mitreTotal > 0) m.mitreCovered.toDouble() / m.mitreTotal else 0.0, cNeon).apply { layoutParams = lp(dp(8)).apply { topMargin = dp(2); bottomMargin = dp(8) } })
-        c.addView(text(if (m.blindSpots.isEmpty()) "Aucun angle mort." else "Angles morts : " + m.blindSpots.joinToString(", "), 12f, cMuted))
+        val pct = if (m.mitreTotal > 0) m.mitreCovered * 100 / m.mitreTotal else 0
+        content.addView(n.section("Couverture MITRE ATT&CK", "${m.mitreCovered}/${m.mitreTotal} · $pct %", n.accentSoft))
+        val c = n.card()
+        val total = m.mitreTotal.coerceIn(1, 20)
+        val strip = n.row()
+        for (i in 0 until total) {
+            val covered = i < m.mitreCovered
+            strip.addView(View(act).apply {
+                background = android.graphics.drawable.GradientDrawable().apply {
+                    cornerRadius = n.dpf(4f)
+                    if (covered) setColor(n.fade(cNeon, 0.45f + 0.5f * ((i * 37) % 10) / 10f))
+                    else { setColor(android.graphics.Color.TRANSPARENT); setStroke(n.dp(1), cCrit, n.dpf(3f), n.dpf(2f)) }
+                }
+                layoutParams = LinearLayout.LayoutParams(0, n.dp(26), 1f).apply { if (i < total - 1) marginEnd = n.dp(3) }
+            })
+        }
+        c.addView(strip)
+        c.addView(n.text(if (m.blindSpots.isEmpty()) "Aucun angle mort sur 7 jours." else "Angles morts (pointillés) : " + m.blindSpots.joinToString(", "),
+            12f, if (m.blindSpots.isEmpty()) cMuted else n.c(R.color.danger_soft)).apply { setPadding(0, n.dp(10), 0, 0) })
         content.addView(c)
     }
 
     private fun net(m: Metrics) {
         if (m.net.isEmpty() && m.dnsOk == null) return
-        val c = card()
-        c.addView(label("Réseau"))
-        val r = row()
+        content.addView(n.section("Réseau"))
+        val r = n.row().apply { layoutParams = n.lp().apply { bottomMargin = n.dp(8) } }
         val gw = m.net.firstOrNull { it.name.contains("asserelle", true) }
         val inet = m.net.firstOrNull { it !== gw }
         r.addView(kpi(ms(inet?.lastMs), "Internet", cText))
         r.addView(kpi(ms(gw?.lastMs), "passerelle", cText))
         r.addView(kpi(if (m.dnsOk == true) "OK" else if (m.dnsOk == false) "KO" else "—", "DNS ${ms(m.dnsMs)}", if (m.dnsOk == true) cOk else cCrit, last = true))
-        c.addView(r)
-        content.addView(c)
+        content.addView(r)
     }
 
     private fun agents(m: Metrics?) {
-        val c = card()
         val active: Int; val total: Int; val down: List<String>
         if (m != null) { active = m.agentsActive; total = m.agentsTotal; down = m.agentsDown }
         else if (wz != null) { active = wz!!.active; total = wz!!.total; down = wz!!.agents.filter { !it.status.equals("active", true) }.map { "${it.name} (${it.id})" } }
         else return
-        val head = row().apply { gravity = Gravity.CENTER_VERTICAL }
-        head.addView(text("Agents", 14f, cText, bold = true).apply { setPadding(0, 0, dp(8), 0) })
-        head.addView(chip("$active actifs", cOk))
-        if (total - active > 0) head.addView(chip("${total - active} déconnectés", cCrit))
-        head.addView(View(act).apply { layoutParams = LinearLayout.LayoutParams(0, 1, 1f) })
-        head.addView(text(if (agentsOpen) "replier ⌃" else "déplier ⌄", 12.5f, cNeon))
+        content.addView(n.section("Agents Wazuh", if (agentsOpen) "replier ⌃" else "déplier ⌄", n.accentSoft).apply {
+            isClickable = true; setOnClickListener { agentsOpen = !agentsOpen; render() }
+        })
+        val c = n.card()
+        val head = n.row()
+        head.addView(n.title("$active", 24f, cText))
+        head.addView(n.monoText(" / $total actifs", 12f, cMuted).apply { layoutParams = n.weight() })
+        if (total - active > 0) head.addView(n.chip("${total - active} déconnectés", cCrit, withDot = true))
+        else head.addView(n.chip("tous actifs", cOk, withDot = true))
         head.setOnClickListener { agentsOpen = !agentsOpen; render() }
         c.addView(head)
         if (agentsOpen) {
+            c.addView(n.divider())
             val list = wz?.agents
             if (list != null && m == null) list.forEach { a -> c.addView(agentRow(a.name, "${a.status} · ${a.ip}", a.status.equals("active", true))) }
             else if (down.isEmpty()) c.addView(note("Aucun agent déconnecté."))
@@ -270,25 +320,17 @@ class HomePanel(
     }
 
     private fun shortcuts() {
-        val c = card()
-        c.addView(label("Raccourcis"))
-        val r = row()
+        content.addView(n.section("Raccourcis"))
+        val r = n.row()
         // Nikon a quitté la barre du bas (remplacé par Chat) : il prend la première place ici.
-        val items = listOf(Triple("◉", "Nikon", R.id.nav_camera), Triple("▣", "Écran USB", R.id.nav_screen),
-            Triple(">_", "Kali", R.id.nav_kali))
-        items.forEachIndexed { i, (g, t, id) ->
-                val b = LinearLayout(act).apply {
-                    orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER
-                    setBackgroundResource(R.drawable.btn_neon); setPadding(dp(6), dp(10), dp(6), dp(10))
-                    layoutParams = LinearLayout.LayoutParams(0, -2, 1f).apply { if (i < items.size - 1) marginEnd = dp(8) }
-                    setOnClickListener { openTab(id) }
-                }
-                b.addView(text(g, 17f, cNeon, bold = true).apply { gravity = Gravity.CENTER })
-                b.addView(text(t, 12f, cText).apply { gravity = Gravity.CENTER })
-                r.addView(b)
-            }
-        c.addView(r)
-        content.addView(c)
+        val items = listOf(Triple(R.drawable.ic_camera, "Nikon", R.id.nav_camera), Triple(R.drawable.ic_screen, "Écran", R.id.nav_screen),
+            Triple(R.drawable.ic_kali, "Kali", R.id.nav_kali))
+        items.forEachIndexed { i, (icon, t, id) ->
+            r.addView(n.shortcut(icon, t) { openTab(id) }.apply {
+                layoutParams = LinearLayout.LayoutParams(0, -2, 1f).apply { if (i < items.size - 1) marginEnd = n.dp(8) }
+            })
+        }
+        content.addView(r)
     }
 
     // ------------------------------------------------------------ réveil
@@ -296,18 +338,17 @@ class HomePanel(
     private fun confirmWake(nodes: List<NodeDef>) {
         val ctx = act.applicationContext
         if (!WolClient.isPaired(ctx)) {
-            AlertDialog.Builder(act).setTitle("wol-pi non appairé")
-                .setMessage("Appaire d'abord le téléphone avec wol-pi : Réglages › Réveil des nœuds.")
-                .setPositiveButton("Réglages") { _, _ -> openTab(R.id.nav_settings) }
-                .setNegativeButton("Annuler", null).show()
+            ConfirmSheet(act, "wol-pi non appairé", "Ouvrir les Réglages")
+                .kicker("RÉVEIL DES NŒUDS").tone(ConfirmSheet.Tone.ACCENT)
+                .message("Appaire d'abord le téléphone avec wol-pi : Réglages › Réveil des nœuds.")
+                .show { openTab(R.id.nav_settings) }
             return
         }
         val names = nodes.joinToString(", ") { it.pveName }
-        AlertDialog.Builder(act)
-            .setTitle(if (nodes.size > 1) "Tout allumer ?" else "Allumer ${nodes[0].pveName} ?")
-            .setMessage("Paquet magique envoyé par wol-pi à : $names.\nUn nœud déjà allumé répond « déjà allumé » (aucun effet). Chaque demande est auditée dans Wazuh.")
-            .setPositiveButton("Allumer") { _, _ -> doWake(nodes) }
-            .setNegativeButton("Annuler", null).show()
+        ConfirmSheet(act, if (nodes.size > 1) "Tout allumer ?" else "Allumer ${nodes[0].pveName} ?", "⏻ Allumer")
+            .kicker("WAKE-ON-LAN · AUDITÉ").tone(ConfirmSheet.Tone.ACCENT)
+            .message("Paquet magique envoyé par wol-pi à : $names. Un nœud déjà allumé répond « déjà allumé » (aucun effet). Chaque demande est auditée dans Wazuh.")
+            .show { doWake(nodes) }
     }
 
     private fun doWake(nodes: List<NodeDef>) {
@@ -350,73 +391,19 @@ class HomePanel(
 
     // ------------------------------------------------------------ petits composants
 
-    private fun lp(h: Int = ViewGroup.LayoutParams.WRAP_CONTENT) = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, h)
+    private fun note(s: String) = n.text(s, 11f, n.faint).apply { setPadding(n.dp(2), n.dp(2), n.dp(2), n.dp(6)) }
 
-    private fun card(bg: Int = R.drawable.card) = LinearLayout(act).apply {
-        orientation = LinearLayout.VERTICAL
-        setBackgroundResource(bg)
-        setPadding(dp(14), dp(12), dp(14), dp(12))
-        layoutParams = lp().apply { bottomMargin = dp(10) }
+    private fun barRow(name: String, frac: Double, value: String, color: Int) = n.row().apply {
+        setPadding(0, n.dp(8), 0, 0)
+        addView(n.monoText(name, 10.5f, cMuted).apply { layoutParams = LinearLayout.LayoutParams(n.dp(34), -2) })
+        addView(n.bar(frac, color).apply { layoutParams = LinearLayout.LayoutParams(0, n.dp(4), 1f) })
+        addView(n.monoText(value, 10.5f, cMuted).apply { layoutParams = LinearLayout.LayoutParams(n.dp(78), -2); gravity = Gravity.END })
     }
 
-    private fun row() = LinearLayout(act).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; layoutParams = lp() }
-
-    private fun text(s: String, size: Float, color: Int, bold: Boolean = false) = TextView(act).apply {
-        text = s; textSize = size; setTextColor(color); if (bold) setTypeface(typeface, Typeface.BOLD)
-    }
-
-    private fun label(s: String, right: String = "") = row().apply {
-        setPadding(0, 0, 0, dp(8))
-        addView(text(s.uppercase(), 10.5f, cNeon, bold = true).apply { letterSpacing = 0.12f; layoutParams = LinearLayout.LayoutParams(0, -2, 1f) })
-        if (right.isNotEmpty()) addView(text(right, 11.5f, cMuted))
-    }
-
-    private fun note(s: String) = text(s, 11f, Color.parseColor("#7D8A98")).apply { setPadding(0, dp(6), 0, 0) }
-
-    private fun chip(s: String, color: Int) = text(s, 11f, color).apply {
-        background = GradientDrawable().apply { cornerRadius = dp(10).toFloat(); setColor(Color.parseColor("#121820")); setStroke(dp(1), adjustAlpha(color, 0.45f)) }
-        setPadding(dp(8), dp(3), dp(8), dp(3))
-        layoutParams = LinearLayout.LayoutParams(-2, -2).apply { marginEnd = dp(6) }
-    }
-
-    private fun dot(color: Int, sizeDp: Int = 9) = View(act).apply {
-        background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(color) }
-        layoutParams = LinearLayout.LayoutParams(dp(sizeDp), dp(sizeDp)).apply { gravity = Gravity.CENTER }
-    }
-
-    private fun bar(frac: Double, color: Int) = LinearLayout(act).apply {
-        background = GradientDrawable().apply { cornerRadius = dp(3).toFloat(); setColor(cTrack) }
-        val f = frac.coerceIn(0.0, 1.0).toFloat()
-        addView(View(act).apply {
-            background = GradientDrawable().apply { cornerRadius = dp(3).toFloat(); setColor(color) }
-            layoutParams = LinearLayout.LayoutParams(0, -1, f.coerceAtLeast(0.001f))
-        })
-        addView(View(act).apply { layoutParams = LinearLayout.LayoutParams(0, -1, (1f - f).coerceAtLeast(0.001f)) })
-    }
-
-    private fun barRow(name: String, frac: Double, value: String) = row().apply {
-        setPadding(0, dp(6), 0, 0)
-        addView(text(name, 11.5f, cMuted).apply { layoutParams = LinearLayout.LayoutParams(dp(36), -2) })
-        addView(bar(frac, cNeon).apply { layoutParams = LinearLayout.LayoutParams(0, dp(6), 1f) })
-        addView(text(value, 11.5f, cMuted).apply { layoutParams = LinearLayout.LayoutParams(dp(78), -2); gravity = Gravity.END })
-    }
-
-    private fun button(s: String, primary: Boolean, onClick: () -> Unit) = TextView(act).apply {
-        text = s; textSize = 12.5f; setTypeface(typeface, Typeface.BOLD)
-        setTextColor(if (primary) Color.WHITE else cNeon)
-        setBackgroundResource(if (primary) R.drawable.btn_accent else R.drawable.btn_neon)
-        setPadding(dp(14), dp(8), dp(14), dp(8))
-        minHeight = dp(40); gravity = Gravity.CENTER
-        setOnClickListener { onClick() }
-    }
-
-    private fun kpi(v: String, l: String, color: Int, last: Boolean = false) = LinearLayout(act).apply {
-        orientation = LinearLayout.VERTICAL
-        setBackgroundResource(R.drawable.tile)
-        setPadding(dp(10), dp(8), dp(10), dp(8))
-        layoutParams = LinearLayout.LayoutParams(0, -2, 1f).apply { if (!last) marginEnd = dp(8) }
-        addView(text(v, 19f, color, bold = true))
-        addView(text(l, 11f, cMuted))
+    private fun kpi(v: String, l: String, color: Int, last: Boolean = false) = n.tile().apply {
+        layoutParams = LinearLayout.LayoutParams(0, -2, 1f).apply { if (!last) marginEnd = n.dp(8) }
+        addView(n.title(v, 20f, n.lighten(color)))
+        addView(n.text(l, 11f, cMuted))
     }
 
     /** Message prérempli pour l'agent N1 (JBR) ; modifiable avant envoi. */
@@ -436,22 +423,31 @@ class HomePanel(
         return "@jbr analyse $ref ($ctx) : « ${desc.take(300)} ». Vrai positif ? Action recommandée ?"
     }
 
-    private fun alertRow(level: Int, t: String, desc: String) = row().apply {
-        setPadding(0, dp(7), 0, 0)
-        addView(text("$level", 12f, Color.parseColor("#0A0E13"), bold = true).apply {
-            gravity = Gravity.CENTER
-            background = GradientDrawable().apply { cornerRadius = dp(6).toFloat(); setColor(levelColorForRule(level)) }
-            layoutParams = LinearLayout.LayoutParams(dp(28), -2).apply { marginEnd = dp(8) }
-        })
-        if (t.isNotEmpty()) addView(text(t, 11.5f, cMuted).apply { layoutParams = LinearLayout.LayoutParams(dp(40), -2) })
-        addView(text(desc, 12.5f, cText).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.END; layoutParams = LinearLayout.LayoutParams(0, -2, 1f) })
+    private fun alertRow(level: Int, t: String, desc: String, sub: String) = LinearLayout(act).apply {
+        orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
+        val col = levelColorForRule(level)
+        background = android.graphics.drawable.GradientDrawable().apply {
+            cornerRadius = n.dpf(12f)
+            if (level >= 12) { orientation = android.graphics.drawable.GradientDrawable.Orientation.LEFT_RIGHT
+                colors = intArrayOf(n.fade(col, 0.12f), ContextCompat.getColor(act, R.color.surface)) }
+            else setColor(ContextCompat.getColor(act, R.color.surface))
+            setStroke(n.dp(1), if (level >= 12) n.fade(col, 0.4f) else n.border)
+        }
+        setPadding(n.dp(12), n.dp(10), n.dp(12), n.dp(10))
+        layoutParams = n.lp().apply { bottomMargin = n.dp(8) }
+        addView(n.levelBadge(level, col).apply { (layoutParams as LinearLayout.LayoutParams).marginEnd = n.dp(12) })
+        val mid = LinearLayout(act).apply { orientation = LinearLayout.VERTICAL; layoutParams = n.weight() }
+        mid.addView(n.ellipsize(n.text(desc, 13f, cText)))
+        if (sub.isNotBlank()) mid.addView(n.ellipsize(n.monoText(sub, 11f, cMuted)))
+        addView(mid)
+        if (t.isNotEmpty()) addView(n.monoText(t, 11f, cMuted).apply { setPadding(n.dp(8), 0, 0, 0) })
     }
 
-    private fun agentRow(name: String, sub: String, ok: Boolean) = row().apply {
-        setPadding(0, dp(8), 0, 0)
-        addView(dot(if (ok) cOk else cCrit))
-        addView(text(name, 13f, cText).apply { setPadding(dp(8), 0, dp(8), 0); layoutParams = LinearLayout.LayoutParams(0, -2, 1f) })
-        addView(text(sub, 11.5f, cMuted))
+    private fun agentRow(name: String, sub: String, ok: Boolean) = n.row().apply {
+        setPadding(0, n.dp(6), 0, n.dp(6))
+        addView(n.dot(if (ok) cOk else cCrit, 7))
+        addView(n.monoText(name, 12.5f, cText).apply { setPadding(n.dp(10), 0, n.dp(8), 0); layoutParams = n.weight() })
+        addView(n.monoText(sub, 11f, cMuted))
     }
 
     private fun openUrl(u: String) = try {
