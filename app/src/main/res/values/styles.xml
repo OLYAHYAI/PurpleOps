@@ -2,7 +2,7 @@
 <!-- Composants « Neon Ops » réutilisables (voir la planche Système du canevas). -->
 <resources>
     <!-- Tuile d'action (Radio, raccourcis) : moitié de ligne, 56 dp. -->
-    <style name="PurpleOps.TileButton">
+    <style name="PurpleOps.TileButton" parent="">
         <item name="android:layout_width">0dp</item>
         <item name="android:layout_weight">1</item>
         <item name="android:layout_height">wrap_content</item>
@@ -19,7 +19,7 @@
     </style>
 
     <!-- Boutons pleine largeur de la feuille de confirmation. -->
-    <style name="PurpleOps.SheetButton">
+    <style name="PurpleOps.SheetButton" parent="">
         <item name="android:layout_width">match_parent</item>
         <item name="android:layout_height">wrap_content</item>
         <item name="android:gravity">center</item>
