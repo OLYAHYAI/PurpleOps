@@ -26,6 +26,20 @@
 //!         0x20 KEY code(Linux) mods(bit0 Maj, bit1 Ctrl, bit2 Alt)
 //!         0x21 TEXT len + UTF-8   | 0x22 CLIP len + UTF-8 (presse-papiers du PC)
 //!         0x30 SCROLL x y dy(i32) | 0x00 PING
+//!   Signal de vie (depuis 0.2) : le PC envoie PING toutes les 2 s ; dès le premier
+//!   PING, la session est fermée si le PC se tait plus de 7 s (écran et luminosité
+//!   rétablis). Le serveur envoie le message 4 (vide) toutes les 2 s ; un ancien PC
+//!   l'ignore (type inconnu).
+//!   Une nouvelle session d'un PC appairé REMPLACE la session en cours (même
+//!   bloquée) au lieu d'attendre derrière.
+//!   Commandes de secours, à la place de 0x05 (réponse : une ligne UTF-8, puis fin) :
+//!         0x06 RESCUE  coupe la session en cours, rétablit veille et luminosité,
+//!                      réveille l'écran
+//!         0x07 STATUS  « STATUS v=2 session=free|busy host=… dim=0|1 ia=on|off|absent »
+//!         0x08 IA-OFF  coupe la prise de commande du serveur MCP (outils phone_*)
+//!                      jusqu'au prochain démarrage du service
+//!   Un ancien service répond à ces commandes en fermant la connexion : le PC
+//!   l'affiche comme « téléphone à mettre à jour ».
 
 mod ctl;
 mod uinput;
@@ -35,7 +49,7 @@ use std::io::{self, BufRead, Read, Write};
 use std::net::{Ipv4Addr, SocketAddr, TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode, Stdio};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -44,6 +58,13 @@ const PROTO: &str = "PPSCR3";
 const DEFAULT_PORT: u16 = 8099;
 const DEFAULT_DIR: &str = "/data/local/soc";
 const DEFAULT_BITRATE: u32 = 16_000_000;
+/// Silence maximal d'un PC qui envoie le signal de vie.
+const PING_TIMEOUT: Duration = Duration::from_secs(7);
+/// Données non acquittées par le PC au-delà de ce délai : connexion considérée morte
+/// (TCP_USER_TIMEOUT), même pour un ancien PC sans signal de vie.
+const TCP_DEAD_MS: u32 = 15_000;
+/// Connexions simultanées (poignées de main + session + secours).
+const MAX_CONNS: usize = 6;
 
 const HELP: &str = "\
 screenctl — écran Android piloté depuis le PC par le câble USB (root, PurpleOps)
@@ -112,7 +133,16 @@ fn serve(args: &[String], dir: PathBuf) -> io::Result<()> {
     }
     let _ = fs::create_dir_all(&dir);
     let log = Arc::new(Mutex::new(Logger::open(&dir.join("screenctl.log"))));
-    let ctx = Ctx { dir, log, dim };
+    let ctl_path = opt(args, "--ctl").map(PathBuf::from);
+    let ctx = Ctx {
+        dir,
+        log,
+        dim,
+        ctl: ctl_path.is_some(),
+        active: Arc::new(Mutex::new(None)),
+        starting: Arc::new(Mutex::new(())),
+        conns: Arc::new(AtomicUsize::new(0)),
+    };
     ctx.log(&format!("start iface={} usb={usb}", iface.as_deref().unwrap_or("-")));
     leave_app_cgroup();
     // Un seul service : le plus récent gagne. Comme le service survit à la
@@ -124,14 +154,17 @@ fn serve(args: &[String], dir: PathBuf) -> io::Result<()> {
         ctx.log(&format!("{older} ancienne(s) instance(s) du service arrêtée(s)"));
         thread::sleep(Duration::from_millis(500)); // libération du port
     }
-    // Réglages de veille laissés par un service tué en pleine session.
+    // Réglages de veille et luminosité laissés par un service tué en pleine session.
     restore_awake(&ctx.dir);
+    if restore_brightness(&ctx.dir) {
+        ctx.log("luminosité d'origine rétablie (service précédent arrêté écran éteint)");
+    }
     let stale = kill_stale_screenrecord();
     if stale > 0 {
         ctx.log(&format!("{stale} screenrecord orphelin(s) d'un service précédent arrêté(s)"));
     }
-    if let Some(p) = opt(args, "--ctl") {
-        ctl::spawn(PathBuf::from(p), ctx.log.clone());
+    if let Some(p) = ctl_path {
+        ctl::spawn(p, ctx.log.clone());
     }
 
     loop {
@@ -165,9 +198,20 @@ fn serve(args: &[String], dir: PathBuf) -> io::Result<()> {
                 Ok((s, peer)) => {
                     let _ = s.set_nonblocking(false);
                     let peer = peer.to_string();
-                    if let Err(e) = ctx.session(s, &peer) {
-                        ctx.log(&format!("session {peer} : {e}"));
+                    // Chaque connexion dans son fil : une session bloquée (PC disparu sans
+                    // fermer) n'empêche plus d'accepter le PC qui revient la remplacer.
+                    if ctx.conns.load(Ordering::SeqCst) >= MAX_CONNS {
+                        ctx.log(&format!("refus {peer} : trop de connexions simultanées"));
+                        continue;
                     }
+                    ctx.conns.fetch_add(1, Ordering::SeqCst);
+                    let c = ctx.clone();
+                    thread::spawn(move || {
+                        if let Err(e) = c.session(s, &peer) {
+                            c.log(&format!("session {peer} : {e}"));
+                        }
+                        c.conns.fetch_sub(1, Ordering::SeqCst);
+                    });
                 }
                 Err(e) if e.kind() == io::ErrorKind::WouldBlock => thread::sleep(Duration::from_millis(200)),
                 Err(e) => ctx.log(&format!("accept : {e}")),
@@ -221,10 +265,25 @@ fn wait_link(iface: &str, usb: bool) -> Ipv4Addr {
     }
 }
 
+#[derive(Clone)]
 struct Ctx {
     dir: PathBuf,
     log: Arc<Mutex<Logger>>,
     dim: bool,
+    /// Prise de commande MCP configurée (--ctl).
+    ctl: bool,
+    /// Session d'image en cours (une seule à la fois).
+    active: Arc<Mutex<Option<Active>>>,
+    /// Sérialise « remplacer l'ancienne session + enregistrer la nouvelle ».
+    starting: Arc<Mutex<()>>,
+    conns: Arc<AtomicUsize>,
+}
+
+/// Session d'image en cours : de quoi la couper depuis une autre connexion.
+struct Active {
+    sock: TcpStream,
+    done: Arc<AtomicBool>,
+    host: String,
 }
 
 impl Ctx {
@@ -245,8 +304,10 @@ impl Ctx {
         }
         let key = key.to_ascii_lowercase();
 
-        if self.is_paired(&key) {
-            self.log(&format!("auth {peer} ok host={host}"));
+        let paired = self.is_paired(&key);
+        if paired {
+            // Journalisé une fois l'opcode connu : STATUS (sondé par l'accueil de
+            // screenview toutes les 5 s) ne doit pas inonder le journal SOC.
         } else if self.pairing_open() {
             self.add_pc(&key, &host)?;
             let _ = fs::remove_file(self.dir.join("screenctl.pairing"));
@@ -259,19 +320,97 @@ impl Ctx {
             return Ok(());
         }
         s.write_all(&[0x00])?;
-        say(&format!("SCREENCTL connected host={host}"));
 
         let mut op = [0u8; 1];
         s.read_exact(&mut op)?;
-        if op[0] != 0x05 {
-            return Err(err(format!("opcode inattendu {:#x}", op[0])));
+        if paired && op[0] != 0x07 {
+            self.log(&format!("auth {peer} ok host={host}"));
+        }
+        match op[0] {
+            0x05 => {}
+            0x06 => return self.rescue(&mut s, &host),
+            0x07 => return reply(&mut s, &self.status_line()),
+            0x08 => return self.ia_off(&mut s, &host),
+            other => return Err(err(format!("opcode inattendu {other:#x}"))),
         }
         let b = read_u32s::<1>(&mut s)?[0];
         let bitrate = if b == 0 { DEFAULT_BITRATE } else { b.clamp(500_000, 40_000_000) };
         s.set_read_timeout(None)?;
+        // Le PC qui revient remplace sa session restée bloquée (ou celle d'un autre PC).
+        let done = Arc::new(AtomicBool::new(false));
+        {
+            let _g = self.starting.lock().unwrap_or_else(|p| p.into_inner());
+            self.preempt(&format!("nouvelle session de {host}"));
+            *self.active.lock().unwrap_or_else(|p| p.into_inner()) =
+                Some(Active { sock: s.try_clone()?, done: done.clone(), host: host.clone() });
+        }
+        say(&format!("SCREENCTL connected host={host}"));
         let r = self.stream(s, bitrate, peer);
+        {
+            let mut a = self.active.lock().unwrap_or_else(|p| p.into_inner());
+            if a.as_ref().is_some_and(|x| Arc::ptr_eq(&x.done, &done)) {
+                *a = None;
+            }
+        }
         say(&format!("SCREENCTL disconnected host={host}"));
+        // En dernier : `preempt` attend ce drapeau (écran et luminosité déjà rétablis).
+        done.store(true, Ordering::SeqCst);
         r
+    }
+
+    /// Coupe la session d'image en cours (s'il y en a une) et attend qu'elle ait
+    /// rétabli veille et luminosité (5 s au plus). Renvoie le PC qui l'avait.
+    fn preempt(&self, why: &str) -> Option<String> {
+        let old = self.active.lock().unwrap_or_else(|p| p.into_inner()).take()?;
+        self.log(&format!("session de {} coupée : {why}", old.host));
+        let _ = old.sock.shutdown(std::net::Shutdown::Both);
+        let t0 = Instant::now();
+        while !old.done.load(Ordering::SeqCst) && t0.elapsed() < Duration::from_secs(5) {
+            thread::sleep(Duration::from_millis(50));
+        }
+        Some(old.host)
+    }
+
+    /// Secours depuis le PC : coupe la session, rétablit veille et luminosité,
+    /// réveille l'écran. Rien n'est demandé sur le téléphone.
+    fn rescue(&self, s: &mut TcpStream, host: &str) -> io::Result<()> {
+        let cut = {
+            let _g = self.starting.lock().unwrap_or_else(|p| p.into_inner());
+            self.preempt(&format!("secours demandé par {host}"))
+        };
+        restore_awake(&self.dir);
+        let lum = restore_brightness(&self.dir);
+        wake_screen();
+        let msg = format!(
+            "OK session={} luminosite={} ecran=reveille",
+            cut.as_deref().map(|h| format!("coupee({h})")).unwrap_or_else(|| "aucune".into()),
+            if lum { "retablie" } else { "inchangee" }
+        );
+        self.log(&format!("secours host={host} {msg}"));
+        say(&format!("SCREENCTL rescue host={host}"));
+        reply(s, &msg)
+    }
+
+    fn status_line(&self) -> String {
+        let busy = self.active.lock().unwrap_or_else(|p| p.into_inner()).as_ref().map(|a| a.host.clone());
+        let ia = if !self.ctl { "absent" } else if ctl::DISABLED.load(Ordering::SeqCst) { "off" } else { "on" };
+        format!(
+            "STATUS v=2 session={} host={} dim={} ia={ia}",
+            if busy.is_some() { "busy" } else { "free" },
+            busy.unwrap_or_else(|| "-".into()),
+            self.dim as u8
+        )
+    }
+
+    /// Coupe le pilotage par l'IA (prise de commande MCP) jusqu'au prochain démarrage.
+    fn ia_off(&self, s: &mut TcpStream, host: &str) -> io::Result<()> {
+        if !self.ctl {
+            return reply(s, "OK ia=absent");
+        }
+        ctl::DISABLED.store(true, Ordering::SeqCst);
+        self.log(&format!("pilotage IA coupé depuis le PC host={host}"));
+        say(&format!("SCREENCTL ia-off host={host}"));
+        reply(s, "OK ia=off")
     }
 
     fn is_paired(&self, key: &str) -> bool {
@@ -301,6 +440,10 @@ impl Ctx {
     /// Session : vidéo dans un fil, événements d'entrée dans celui-ci.
     fn stream(&self, s: TcpStream, bitrate: u32, peer: &str) -> io::Result<()> {
         let (w, h) = display_size();
+        // Un PC disparu sans fermer ne doit plus bloquer la session des minutes :
+        // écriture bornée et données non acquittées = connexion morte.
+        s.set_write_timeout(Some(Duration::from_secs(10)))?;
+        tcp_user_timeout(&s, TCP_DEAD_MS);
         let mut first = s.try_clone()?;
         first.write_all(&w.to_be_bytes())?;
         first.write_all(&h.to_be_bytes())?;
@@ -308,7 +451,7 @@ impl Ctx {
         self.log(&format!("stream {peer} {w}x{h} h264 {bitrate} bit/s"));
         let helper = Helper::start(Some(out.clone()), self.log.clone());
         let awake = Awake::start(&self.dir, &self.log);
-        let dimmer = if self.dim { Dimmer::start(self.log.clone()) } else { None };
+        let dimmer = if self.dim { Dimmer::start(&self.dir, self.log.clone()) } else { None };
 
         let mut touch = uinput::Touch::new(w, h).map_err(|e| self.log(&format!("uinput tactile : {e}"))).ok();
         let mut kbd = uinput::Keyboard::new().map_err(|e| self.log(&format!("uinput clavier : {e}"))).ok();
@@ -316,8 +459,11 @@ impl Ctx {
         let alive = Arc::new(AtomicBool::new(true));
         let child: Arc<Mutex<Option<std::process::Child>>> = Arc::new(Mutex::new(None));
         let video = spawn_video(out.clone(), bitrate, alive.clone(), child.clone(), self.log.clone());
+        let pulse = spawn_pulse(out.clone(), s.try_clone()?, alive.clone());
 
         let mut s = s;
+        let mut pinging = false;
+        let mut silent = false;
         let mut skipped = 0u32;
         let mut fallback_down: Option<(u32, u32)> = None;
         let mut last_input = Instant::now();
@@ -326,7 +472,8 @@ impl Ctx {
                 return Ok(());
             }
             let mut op = [0u8; 1];
-            if s.read_exact(&mut op).is_err() {
+            if let Err(e) = s.read_exact(&mut op) {
+                silent = matches!(e.kind(), io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut);
                 return Ok(());
             }
             // Première action après une pause : si l'écran s'est mis en veille entre-temps
@@ -339,7 +486,14 @@ impl Ctx {
                 last_input = Instant::now();
             }
             match op[0] {
-                0x00 => {}
+                0x00 => {
+                    // Premier signal de vie : ce PC sait le faire, son silence devient
+                    // une panne (écran rendu au téléphone au lieu de rester noir).
+                    if !pinging {
+                        pinging = true;
+                        s.set_read_timeout(Some(PING_TIMEOUT))?;
+                    }
+                }
                 0x10 | 0x11 => {
                     let v = read_u32s::<2>(&mut s)?;
                     let (x, y) = (v[0].min(w - 1), v[1].min(h - 1));
@@ -413,6 +567,7 @@ impl Ctx {
         })();
 
         alive.store(false, Ordering::SeqCst);
+        let _ = pulse.join();
         if let Some(mut c) = child.lock().unwrap_or_else(|p| p.into_inner()).take() {
             let _ = c.kill();
             let _ = c.wait();
@@ -423,7 +578,9 @@ impl Ctx {
         helper.stop();
         drop(dimmer);
         drop(awake);
-        let why = if video.is_finished() {
+        let why = if silent {
+            format!("PC muet depuis {} s (signal de vie perdu)", PING_TIMEOUT.as_secs())
+        } else if video.is_finished() {
             video.join().unwrap_or_else(|_| "fil vidéo en erreur".into())
         } else {
             "client parti".into()
@@ -434,6 +591,31 @@ impl Ctx {
         self.log(&format!("stream {peer} fin : {why}"));
         res
     }
+}
+
+/// Signal de vie serveur -> PC (message 4, vide) toutes les 2 s. Si l'écriture
+/// échoue (PC parti) ou si la session se termine ailleurs (fil vidéo), la prise
+/// est fermée : la lecture des événements se débloque et la session se nettoie.
+fn spawn_pulse(out: Out, sock: TcpStream, alive: Arc<AtomicBool>) -> thread::JoinHandle<()> {
+    thread::spawn(move || {
+        let mut last = Instant::now();
+        while alive.load(Ordering::SeqCst) {
+            thread::sleep(Duration::from_millis(100));
+            if last.elapsed() >= Duration::from_secs(2) {
+                last = Instant::now();
+                if send_msg(&out, 4, b"").is_err() {
+                    alive.store(false, Ordering::SeqCst);
+                }
+            }
+        }
+        let _ = sock.shutdown(std::net::Shutdown::Both);
+    })
+}
+
+/// Réponse des commandes de secours : une ligne, puis fin de connexion.
+fn reply(s: &mut TcpStream, line: &str) -> io::Result<()> {
+    s.write_all(format!("{line}\n").as_bytes())?;
+    s.flush()
 }
 
 /// Fil vidéo : sortie H.264 de `screenrecord`, relancé à chaque fin de process
@@ -679,10 +861,13 @@ struct Dimmer {
     thread: Option<thread::JoinHandle<()>>,
     path: PathBuf,
     saved: String,
+    dir: PathBuf,
 }
 
+const BRIGHTNESS_FILE: &str = "screenctl_brightness";
+
 impl Dimmer {
-    fn start(log: Arc<Mutex<Logger>>) -> Option<Dimmer> {
+    fn start(dir: &Path, log: Arc<Mutex<Logger>>) -> Option<Dimmer> {
         let logl = |m: &str| log.lock().unwrap_or_else(|p| p.into_inner()).line(m);
         let path = fs::read_dir("/sys/class/backlight")
             .ok()?
@@ -693,7 +878,13 @@ impl Dimmer {
             logl("écran éteint : rétroéclairage introuvable");
             return None;
         };
+        // Valeur laissée par une session précédente non terminée : c'est elle l'origine
+        // (la valeur actuelle vaut 0, on ne la mémoriserait pas).
+        restore_brightness(dir);
         let saved = fs::read_to_string(&path).unwrap_or_default().trim().to_string();
+        // Écrite sur disque : un arrêt brutal du service ne laisse plus l'écran noir
+        // (rétablie au démarrage suivant, ou par le secours depuis le PC).
+        let _ = fs::write(dir.join(BRIGHTNESS_FILE), format!("{}\n{saved}\n", path.display()));
         let stop = Arc::new(AtomicBool::new(false));
         let (st, p) = (stop.clone(), path.clone());
         let thread = thread::spawn(move || {
@@ -703,7 +894,7 @@ impl Dimmer {
             }
         });
         logl(&format!("écran du téléphone éteint pendant la session ({})", path.display()));
-        Some(Dimmer { stop, thread: Some(thread), path, saved })
+        Some(Dimmer { stop, thread: Some(thread), path, saved, dir: dir.to_path_buf() })
     }
 }
 
@@ -716,7 +907,21 @@ impl Drop for Dimmer {
         if !self.saved.is_empty() {
             let _ = fs::write(&self.path, &self.saved);
         }
+        let _ = fs::remove_file(self.dir.join(BRIGHTNESS_FILE));
     }
+}
+
+/// Rétablit la luminosité mémorisée par `Dimmer::start`, s'il y en a une.
+/// Renvoie vrai si une valeur a été rétablie.
+fn restore_brightness(dir: &Path) -> bool {
+    let file = dir.join(BRIGHTNESS_FILE);
+    let Ok(saved) = fs::read_to_string(&file) else { return false };
+    let mut it = saved.lines();
+    let (path, val) = (it.next().unwrap_or("").trim(), it.next().unwrap_or("").trim());
+    let ok = path.starts_with("/sys/class/backlight/") && !val.is_empty() && val.bytes().all(|b| b.is_ascii_digit())
+        && fs::write(path, val).is_ok();
+    let _ = fs::remove_file(file);
+    ok
 }
 
 fn setting_get(ns: &str, key: &str) -> String {
@@ -975,7 +1180,20 @@ fn bind_to_device(_listener: &TcpListener, _iface: &str) -> io::Result<()> {
     Ok(())
 }
 
-#[cfg(target_os = "android")]
+/// TCP_USER_TIMEOUT : délai maximal pour que le PC acquitte nos données.
+#[cfg(any(target_os = "android", target_os = "linux"))]
+fn tcp_user_timeout(s: &TcpStream, ms: u32) {
+    use std::os::unix::io::AsRawFd;
+    // IPPROTO_TCP = 6, TCP_USER_TIMEOUT = 18
+    unsafe {
+        setsockopt(s.as_raw_fd(), 6, 18, (&ms as *const u32).cast(), 4);
+    }
+}
+
+#[cfg(not(any(target_os = "android", target_os = "linux")))]
+fn tcp_user_timeout(_s: &TcpStream, _ms: u32) {}
+
+#[cfg(any(target_os = "android", target_os = "linux"))]
 extern "C" {
     fn setsockopt(fd: i32, level: i32, optname: i32, optval: *const std::ffi::c_void, optlen: u32) -> i32;
 }

@@ -27,7 +27,13 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
+use std::sync::atomic::{AtomicBool, Ordering};
+
 use super::{b64_decode, display_size, input, Helper, Logger};
+
+/// Pilotage par l'IA coupé depuis le PC (commande de secours 0x08 de screenview) :
+/// toutes les commandes sont refusées jusqu'au prochain démarrage du service.
+pub static DISABLED: AtomicBool = AtomicBool::new(false);
 
 pub fn spawn(path: PathBuf, log: Arc<Mutex<Logger>>) {
     thread::spawn(move || {
@@ -67,7 +73,11 @@ fn handle(s: UnixStream, log: &Arc<Mutex<Logger>>, helper: &Arc<Mutex<Option<Hel
         let mut it = line.split_whitespace();
         let cmd = it.next().unwrap_or("");
         let args: Vec<&str> = it.collect();
-        let res: Result<Vec<u8>, String> = run(cmd, &args, log, helper);
+        let res: Result<Vec<u8>, String> = if DISABLED.load(Ordering::SeqCst) {
+            Err("pilotage IA coupé depuis le PC (réactiver : redémarrer l'Écran dans PurpleOps)".into())
+        } else {
+            run(cmd, &args, log, helper)
+        };
         match &res {
             Ok(_) => logl(&format!("ia {}", describe(cmd, &args))),
             Err(e) => logl(&format!("ia {} refusé : {e}", describe(cmd, &args))),

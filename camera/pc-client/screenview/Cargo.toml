@@ -1,7 +1,7 @@
 [package]
 name = "screenview"
 description = "Client PC (Windows) : affiche l'écran du téléphone et renvoie les touchers — scrcpy maison PurpleOps"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 license = "MIT"
 
@@ -10,6 +10,8 @@ license = "MIT"
 minifb = "0.25"
 # Décodeur H.264 (Cisco OpenH264, compilé depuis les sources et embarqué : rien à installer).
 openh264 = "0.9"
+# Texte de la page d'accueil (rastérisation des polices embarquées), Rust pur.
+fontdue = "0.9"
 
 # Icône et métadonnées de l'exécutable (build.rs). Hôte Windows uniquement (CI windows-2025).
 [target.'cfg(windows)'.build-dependencies]
