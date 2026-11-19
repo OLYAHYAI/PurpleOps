@@ -203,6 +203,9 @@ class ScreenPanel(
                 refreshPcs()
             }
             "refused" -> status.text = "PC « $host » refusé : appuie sur APPAIRER UN PC"
+            // Secours depuis screenview.exe (sans toucher au téléphone).
+            "rescue" -> status.text = "Écran récupéré depuis le PC « $host » (session coupée, luminosité rétablie)"
+            "ia-off" -> status.text = "Pilotage IA coupé depuis le PC « $host » — redémarrer l'Écran pour le réactiver"
         }
         append(line.removePrefix("SCREENCTL "))
     }

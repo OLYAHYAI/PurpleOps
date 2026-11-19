@@ -1,7 +1,10 @@
 //! screenview — client PC (Windows) de l'écran USB de PurpleOps.
 //!
-//! Double-clic : une seule fenêtre, celle du téléphone (pas de console ; l'état
-//! s'affiche dans son titre). Le téléphone est trouvé seul (passerelle de la carte
+//! Double-clic : page d'accueil au thème du téléphone (état de la liaison,
+//! connexion automatique après 3 s, secours), puis la fenêtre du téléphone.
+//! F12 ou image perdue : retour à l'accueil, d'où « Récupérer l'écran du
+//! téléphone » coupe une session bloquée et rallume l'écran, sans toucher au
+//! téléphone (voir home.rs). Le téléphone est trouvé seul (passerelle de la carte
 //! « UsbNcm ») ; ce PC s'identifie par une clé gardée dans
 //! %APPDATA%\PurpleOps\screenview.key. Première fois : « APPAIRER UN PC » dans
 //! PurpleOps, la connexion se fait d'elle-même.
@@ -19,10 +22,14 @@
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod home;
+mod ui;
+
 use std::io::{self, Read, Write};
 use std::net::TcpStream;
 use std::path::PathBuf;
 use std::sync::mpsc::{self, Sender};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -34,6 +41,10 @@ use openh264::formats::YUVSource;
 const PROTO: &str = "PPSCR3";
 const MAX_WIN_H: usize = 960;
 const MAX_MSG: usize = 16 << 20;
+/// Signal de vie PC -> téléphone (le téléphone coupe la session après 7 s de silence).
+const PING_EVERY: Duration = Duration::from_secs(2);
+/// Sans aucun message du téléphone (qui envoie son signal toutes les 2 s) : image perdue.
+const PHONE_SILENCE: Duration = Duration::from_secs(8);
 
 // Codes clavier Linux (le téléphone les reçoit tels quels via uinput).
 const KEY_BACK: u32 = 158;
@@ -90,80 +101,34 @@ fn real_main() -> io::Result<()> {
         });
     }
 
-    let mut wait = WaitWindow::new()?;
-    let mut status = String::from("recherche du téléphone…");
-    let mut next_try = Instant::now();
+    let mut fonts = ui::Fonts::load();
+    let mut home = home::Home::new(phone, port, key, name);
+    let mut entry = home::Entry::Start;
     loop {
-        if !wait.show(&status) {
-            return Ok(()); // fermé par l'utilisateur
-        }
-        if Instant::now() < next_try {
-            continue;
-        }
-        next_try = Instant::now() + Duration::from_secs(2);
-        let Some(h) = phone.lock().unwrap().clone() else {
-            status = "en attente du téléphone (câble branché, Écran USB activé)".into();
-            continue;
-        };
-        match connect(&h, port, &key, &name) {
-            Ok(Some(s)) => {
+        match home.run(&mut fonts, entry)? {
+            home::Exit::Quit => return Ok(()),
+            home::Exit::Connected(s, h) => {
                 log(&format!("connecté à {h}:{port}"));
                 save_last_host(&h);
-                drop(wait);
-                let closed = match session(s, mbps) {
-                    Ok(c) => c,
+                entry = match session(s, mbps) {
+                    Ok(End::Closed) => return Ok(()),
+                    Ok(End::Home) => home::Entry::User,
+                    Ok(End::Lost(why)) => home::Entry::Lost(why),
                     Err(e) => {
                         log(&format!("session : {e}"));
-                        false
+                        home::Entry::Lost(format!("session interrompue : {e}"))
                     }
                 };
-                if closed {
-                    return Ok(());
-                }
-                wait = WaitWindow::new()?;
-                status = "connexion perdue, reprise…".into();
-            }
-            Ok(None) => status = "PC non autorisé : PurpleOps > Écran > APPAIRER UN PC".into(),
-            Err(_) => status = format!("téléphone {h} trouvé, Écran USB pas encore activé"),
-        }
-    }
-}
-
-/// Petite fenêtre affichée tant qu'on n'est pas connecté ; l'état est dans le titre.
-struct WaitWindow {
-    win: Window,
-    buf: Vec<u32>,
-    title: String,
-}
-
-impl WaitWindow {
-    fn new() -> io::Result<Self> {
-        let (w, h) = (480, 90);
-        let win = Window::new("PurpleOps — écran USB", w, h, WindowOptions::default())
-            .map_err(|e| err(&format!("fenêtre : {e}")))?;
-        set_window_icon(&win);
-        let mut buf = vec![0x0B0A12u32; w * h];
-        for x in 0..w {
-            for y in 40..50 {
-                buf[y * w + x] = if x % 16 < 10 { 0x9A6BFF } else { 0x0B0A12 };
             }
         }
-        Ok(WaitWindow { win, buf, title: String::new() })
-    }
-
-    fn show(&mut self, status: &str) -> bool {
-        if status != self.title {
-            self.win.set_title(&format!("PurpleOps — {status}"));
-            self.title = status.into();
-        }
-        self.win.update_with_buffer(&self.buf, 480, 90).is_ok() && self.win.is_open()
     }
 }
 
-/// Some(flux) si autorisé, None si ce PC n'est pas appairé.
-fn connect(host: &str, port: u16, key: &str, name: &str) -> io::Result<Option<TcpStream>> {
+/// Connexion + poignée de main : Some(flux) si ce PC est autorisé, None s'il
+/// n'est pas appairé. Utilisée pour l'image (0x05) et les commandes de secours.
+fn connect_raw(host: &str, port: u16, key: &str, name: &str, timeout: Duration) -> io::Result<Option<TcpStream>> {
     let sa = format!("{host}:{port}").parse().map_err(|_| err("adresse invalide"))?;
-    let mut s = TcpStream::connect_timeout(&sa, Duration::from_secs(2))?;
+    let mut s = TcpStream::connect_timeout(&sa, timeout)?;
     s.set_nodelay(true)?;
     s.set_read_timeout(Some(Duration::from_secs(10)))?;
     s.write_all(format!("{PROTO} {key} {name}\n").as_bytes())?;
@@ -264,6 +229,7 @@ fn span(i: usize, n: usize, src: usize) -> (usize, usize) {
 
 /// Événements envoyés au téléphone (sans réponse).
 enum Ev {
+    Ping,
     Down(u32, u32),
     Move(u32, u32),
     Up,
@@ -283,6 +249,7 @@ impl Ev {
             }
         };
         match self {
+            Ev::Ping => put(0x00, &[]),
             Ev::Down(x, y) => put(0x10, &[*x, *y]),
             Ev::Move(x, y) => put(0x11, &[*x, *y]),
             Ev::Up => put(0x12, &[]),
@@ -313,8 +280,18 @@ impl InputCallback for Chars {
     }
 }
 
-/// Une session : renvoie Ok(true) si l'utilisateur a fermé la fenêtre.
-fn session(mut s: TcpStream, mbps: u32) -> io::Result<bool> {
+/// Fin d'une session.
+enum End {
+    /// Fenêtre fermée par l'utilisateur : on quitte.
+    Closed,
+    /// F12 : retour à l'accueil.
+    Home,
+    /// Image / connexion perdue (raison).
+    Lost(String),
+}
+
+/// Une session d'image.
+fn session(mut s: TcpStream, mbps: u32) -> io::Result<End> {
     s.write_all(&[0x05])?;
     s.write_all(&(mbps.clamp(1, 40) * 1_000_000).to_be_bytes())?;
     let dw = read_u32(&mut s)? as usize;
@@ -328,11 +305,14 @@ fn session(mut s: TcpStream, mbps: u32) -> io::Result<bool> {
     let shown: Shown = Arc::new(Mutex::new(None));
     let stats = Arc::new(Mutex::new(String::new()));
     let alive = Arc::new(Mutex::new(true));
+    let rx_seen = Arc::new(Mutex::new(Instant::now()));
+    let pulse = Arc::new(AtomicBool::new(false));
     let (clip_tx, clip_rx) = mpsc::channel::<String>();
     {
         let (r, sh, st, al) = (s.try_clone()?, shown.clone(), stats.clone(), alive.clone());
+        let (seen, pl) = (rx_seen.clone(), pulse.clone());
         thread::spawn(move || {
-            if let Err(e) = recv_loop(r, sh, st, clip_tx) {
+            if let Err(e) = recv_loop(r, sh, st, clip_tx, seen, pl) {
                 log(&format!("flux interrompu : {e}"));
             }
             *al.lock().unwrap() = false;
@@ -346,6 +326,19 @@ fn session(mut s: TcpStream, mbps: u32) -> io::Result<bool> {
                 if w.write_all(&e.encode()).is_err() {
                     break;
                 }
+            }
+        });
+    }
+    // Signal de vie : sans lui, un téléphone dont le PC a disparu garderait la
+    // session (et l'écran noir) ouverte ; avec, il la coupe après 7 s de silence.
+    {
+        let (tx, al) = (ev_tx.clone(), alive.clone());
+        thread::spawn(move || {
+            while *al.lock().unwrap() {
+                if tx.send(Ev::Ping).is_err() {
+                    break;
+                }
+                thread::sleep(PING_EVERY);
             }
         });
     }
@@ -367,7 +360,18 @@ fn session(mut s: TcpStream, mbps: u32) -> io::Result<bool> {
 
     while win.is_open() {
         if !*alive.lock().unwrap() {
-            return Ok(false);
+            return Ok(End::Lost("connexion au téléphone interrompue".into()));
+        }
+        // Téléphone récent (signal de vie reçu au moins une fois) devenu muet.
+        if pulse.load(Ordering::SeqCst) && rx_seen.lock().unwrap().elapsed() > PHONE_SILENCE {
+            *alive.lock().unwrap() = false;
+            let _ = s.shutdown(std::net::Shutdown::Both);
+            return Ok(End::Lost(format!("plus de signal du téléphone depuis {} s", PHONE_SILENCE.as_secs())));
+        }
+        if win.is_key_pressed(Key::F12, KeyRepeat::No) {
+            *alive.lock().unwrap() = false;
+            let _ = s.shutdown(std::net::Shutdown::Both);
+            return Ok(End::Home);
         }
         // Presse-papiers : téléphone -> PC, puis PC -> téléphone (avant les touches,
         // pour qu'un Ctrl+V juste après une copie colle bien le nouveau texte).
@@ -466,13 +470,21 @@ fn session(mut s: TcpStream, mbps: u32) -> io::Result<bool> {
         }
         win.update_with_buffer(&buf, view.ww, view.wh).map_err(|e| err(&format!("maj fenêtre : {e}")))?;
     }
+    *alive.lock().unwrap() = false;
     let _ = s.shutdown(std::net::Shutdown::Both);
-    Ok(true)
+    Ok(End::Closed)
 }
 
 /// Messages du téléphone : u8 type + u32 taille + contenu.
 /// 1 = image H.264 complète (décodée, réduite, publiée) ; 2 = presse-papiers.
-fn recv_loop(mut s: TcpStream, shown: Shown, stats: Arc<Mutex<String>>, clip: Sender<String>) -> io::Result<()> {
+fn recv_loop(
+    mut s: TcpStream,
+    shown: Shown,
+    stats: Arc<Mutex<String>>,
+    clip: Sender<String>,
+    seen: Arc<Mutex<Instant>>,
+    pulse: Arc<AtomicBool>,
+) -> io::Result<()> {
     let mut dec = Decoder::new().map_err(|e| err(&format!("décodeur H.264 : {e}")))?;
     let mut msg: Vec<u8> = Vec::new();
     let (mut frames, mut errors, mut bytes, mut dec_time) = (0u32, 0u32, 0usize, Duration::ZERO);
@@ -488,6 +500,7 @@ fn recv_loop(mut s: TcpStream, shown: Shown, stats: Arc<Mutex<String>>, clip: Se
         msg.resize(len, 0);
         s.read_exact(&mut msg)?;
         bytes += len + 5;
+        *seen.lock().unwrap() = Instant::now();
 
         match head[0] {
             1 => {
@@ -518,6 +531,8 @@ fn recv_loop(mut s: TcpStream, shown: Shown, stats: Arc<Mutex<String>>, clip: Se
                 }
                 phone_state = t;
             }
+            // Signal de vie du téléphone (toutes les 2 s) : son absence = image perdue.
+            4 => pulse.store(true, Ordering::SeqCst),
             _ => {} // type inconnu : ignoré (compatibilité future)
         }
 
