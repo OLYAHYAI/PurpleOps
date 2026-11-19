@@ -2,7 +2,7 @@ package com.jbr.purpleops
 
 import android.content.Context
 import android.view.View
-import android.widget.CheckBox
+import android.widget.CompoundButton
 import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
@@ -34,10 +34,10 @@ class ScreenPanel(
     private val info: TextView = root.findViewById(R.id.scrInfo)
     private val pairBtn: TextView = root.findViewById(R.id.scrPair)
     private val forgetBtn: TextView = root.findViewById(R.id.scrForget)
-    private val auto: CheckBox = root.findViewById(R.id.scrAuto)
-    private val dim: CheckBox = root.findViewById(R.id.scrDim)
-    private val ai: CheckBox = root.findViewById(R.id.scrAi)
-    private val lan: CheckBox = root.findViewById(R.id.scrLan)
+    private val auto: CompoundButton = root.findViewById(R.id.scrAuto)
+    private val dim: CompoundButton = root.findViewById(R.id.scrDim)
+    private val ai: CompoundButton = root.findViewById(R.id.scrAi)
+    private val lan: CompoundButton = root.findViewById(R.id.scrLan)
     private val pcs: TextView = root.findViewById(R.id.scrPcs)
     private val log: TextView = root.findViewById(R.id.scrLog)
     private val logScroll: ScrollView = root.findViewById(R.id.scrLogScroll)
@@ -99,7 +99,7 @@ class ScreenPanel(
                 val (code, _) = RootRunner.runAndroidRoot("pidof libscreenctl.so")
                 if (code == 0) {
                     running = true
-                    toggle.text = "ARRÊTER"
+                    setToggle(true)
                     status.text = "Actif (lancé précédemment)"
                     info.text = "Sur le PC : double-clic sur screenview.exe."
                 } else if (auto.isChecked) {
@@ -110,10 +110,17 @@ class ScreenPanel(
         }
     }
 
+    /** Bouton principal : « Activer » (accent plein) ou « Arrêter » (contour rouge). */
+    private fun setToggle(on: Boolean) {
+        toggle.text = if (on) "Arrêter le pilotage" else "Activer"
+        toggle.setBackgroundResource(if (on) R.drawable.btn_outline_danger else R.drawable.btn_accent)
+        toggle.setTextColor(androidx.core.content.ContextCompat.getColor(toggle.context, if (on) R.color.danger_soft else R.color.bg))
+    }
+
     private fun setIdle(msg: String) {
         running = false
         status.text = msg
-        toggle.text = "ACTIVER"
+        setToggle(false)
         info.text = if (lan.isChecked)
             "Sans câble (Tailscale) : ACTIVER, puis sur le PC double-clic sur screenview.exe (il se connecte seul au dernier téléphone)."
         else
@@ -122,13 +129,14 @@ class ScreenPanel(
 
     private fun append(s: String) {
         log.append(s + "\n")
-        logScroll.post { logScroll.fullScroll(View.FOCUS_DOWN) }
+        // scrollTo (et non fullScroll) : le journal est dans l'écran défilant, ne pas voler le focus.
+        logScroll.post { logScroll.scrollTo(0, log.bottom) }
     }
 
     private fun start() {
         if (!File(bin).exists() || running) return
         running = true
-        toggle.text = "ARRÊTER"
+        setToggle(true)
         status.text = "Démarrage…"
         scope.launch(Dispatchers.IO) {
             var started: Process? = null

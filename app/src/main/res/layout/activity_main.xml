@@ -48,5 +48,9 @@
         app:itemTextColor="@color/nav_item"
         app:itemActiveIndicatorStyle="@style/Widget.PurpleOps.NavIndicator"
         app:paddingBottomSystemWindowInsets="false"
+        app:itemPaddingTop="8dp"
+        app:itemPaddingBottom="8dp"
+        app:itemTextAppearanceActive="@style/TextAppearance.PurpleOps.NavLabel"
+        app:itemTextAppearanceInactive="@style/TextAppearance.PurpleOps.NavLabel"
         app:labelVisibilityMode="labeled" />
 </LinearLayout>

@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Coin-repère HUD (haut-gauche) ; les autres coins = rotation de l'ImageView. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android" android:width="22dp" android:height="22dp" android:viewportWidth="22" android:viewportHeight="22">
+    <path android:strokeColor="#A37BFF" android:strokeWidth="2" android:fillColor="#00000000" android:pathData="M1,21V1H21" />
+</vector>

@@ -75,7 +75,7 @@ class ConfirmSheet(
             })
             val et = EditText(act).apply {
                 setText(f.initial); hint = f.hint; setSingleLine(); textSize = 13f
-                typeface = android.graphics.Typeface.MONOSPACE
+                typeface = androidx.core.content.res.ResourcesCompat.getFont(act, R.font.jetbrains_mono)
                 setBackgroundResource(R.drawable.bg_input)
                 setTextColor(ContextCompat.getColor(act, R.color.text))
                 setHintTextColor(ContextCompat.getColor(act, R.color.faint))

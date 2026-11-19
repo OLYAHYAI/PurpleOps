@@ -4,17 +4,23 @@
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent" android:layout_height="match_parent" android:orientation="vertical">
 
+    <!-- En-tête : salon Matrix (même salon qu'Element X). -->
     <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
-        android:orientation="horizontal" android:gravity="center_vertical" android:paddingBottom="8dp">
-        <TextView android:id="@+id/chatBack" android:layout_width="wrap_content" android:layout_height="wrap_content"
-            android:text="‹" android:textColor="@color/neon" android:textSize="26sp" android:paddingEnd="12dp" />
-        <TextView android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content"
-            android:text="#soc" android:textColor="@color/text" android:textStyle="bold" android:textSize="20sp" />
-        <TextView android:id="@+id/chatStatus" android:layout_width="wrap_content" android:layout_height="wrap_content"
-            android:text="…" android:textColor="@color/muted" android:textSize="11sp"
-            android:background="@drawable/chip_root" android:paddingStart="10dp" android:paddingEnd="10dp" />
-        <TextView android:id="@+id/chatMenu" android:layout_width="wrap_content" android:layout_height="wrap_content"
-            android:text="⋮" android:textColor="@color/neon" android:textSize="22sp" android:paddingStart="12dp" android:paddingEnd="4dp" />
+        android:orientation="horizontal" android:gravity="center_vertical" android:paddingBottom="12dp">
+        <TextView android:id="@+id/chatBack" android:layout_width="40dp" android:layout_height="40dp"
+            android:gravity="center" android:background="@drawable/btn_neon" android:layout_marginEnd="12dp"
+            android:text="#" android:textColor="@color/accent_soft" android:textSize="17sp" android:fontFamily="@font/jetbrains_mono"
+            android:importantForAccessibility="no" />
+        <LinearLayout android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content" android:orientation="vertical">
+            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+                android:text="soc:maison" android:textColor="@color/text" android:textSize="17sp"
+                android:fontFamily="@font/space_grotesk" android:textStyle="bold" />
+            <TextView android:id="@+id/chatStatus" android:layout_width="wrap_content" android:layout_height="wrap_content"
+                android:text="…" android:textColor="@color/muted" android:textSize="11sp" android:fontFamily="@font/jetbrains_mono" />
+        </LinearLayout>
+        <TextView android:id="@+id/chatMenu" android:layout_width="40dp" android:layout_height="40dp" android:gravity="center"
+            android:background="@drawable/btn_ghost" android:contentDescription="Menu du salon"
+            android:text="⋮" android:textColor="@color/text_soft" android:textSize="18sp" />
     </LinearLayout>
 
     <!-- Connexion (session dédiée « PurpleOps ») -->
@@ -41,9 +47,9 @@
                 android:inputType="textPassword" android:singleLine="true" android:layout_marginBottom="14dp" />
             <TextView android:id="@+id/chatConnect" android:layout_width="match_parent" android:layout_height="wrap_content"
                 android:background="@drawable/btn_accent" android:gravity="center" android:paddingTop="12dp" android:paddingBottom="12dp"
-                android:text="CONNECTER" android:textColor="@color/text" android:textStyle="bold" android:textSize="13sp" />
+                android:text="CONNECTER" android:textColor="@color/bg" android:textStyle="bold" android:textSize="13sp" />
             <TextView android:id="@+id/chatLoginStatus" android:layout_width="match_parent" android:layout_height="wrap_content"
-                android:text="" android:textColor="@color/muted" android:textSize="12sp" android:fontFamily="monospace" android:paddingTop="10dp" />
+                android:text="" android:textColor="@color/muted" android:textSize="12sp" android:fontFamily="@font/jetbrains_mono" android:paddingTop="10dp" />
         </LinearLayout>
     </ScrollView>
 
@@ -62,7 +68,8 @@
             <TextView android:id="@+id/chatReplyText" android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content"
                 android:text="" android:textColor="@color/muted" android:textSize="12sp" android:maxLines="2" android:ellipsize="end" />
             <TextView android:id="@+id/chatReplyCancel" android:layout_width="wrap_content" android:layout_height="wrap_content"
-                android:text="✕" android:textColor="@color/neon" android:textSize="16sp" android:paddingStart="12dp" />
+                android:text="✕" android:textColor="@color/accent_soft" android:textSize="16sp" android:paddingStart="12dp"
+                android:contentDescription="Annuler la réponse" />
         </LinearLayout>
 
         <HorizontalScrollView android:layout_width="match_parent" android:layout_height="wrap_content" android:scrollbars="none"
@@ -72,15 +79,14 @@
         </HorizontalScrollView>
 
         <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
-            android:orientation="horizontal" android:gravity="bottom">
+            android:orientation="horizontal" android:gravity="bottom" android:paddingTop="8dp">
             <EditText android:id="@+id/chatInput" android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content"
                 android:background="@drawable/bg_input" android:textColor="@color/text" android:textColorHint="@color/muted"
-                android:textSize="14sp" android:hint="Message à #soc — @agent pour solliciter"
+                android:textSize="14sp" android:hint="Écrire à #soc… (@agent pour solliciter)"
                 android:inputType="textMultiLine|textCapSentences" android:maxLines="5" android:maxLength="4000" />
-            <TextView android:id="@+id/chatSend" android:layout_width="wrap_content" android:layout_height="wrap_content"
+            <TextView android:id="@+id/chatSend" android:layout_width="48dp" android:layout_height="48dp"
                 android:background="@drawable/btn_accent" android:gravity="center" android:layout_marginStart="8dp"
-                android:paddingStart="16dp" android:paddingEnd="16dp" android:paddingTop="12dp" android:paddingBottom="12dp"
-                android:text="➤" android:textColor="@color/text" android:textSize="16sp" />
+                android:text="➤" android:textColor="@color/bg" android:textSize="17sp" android:contentDescription="Envoyer" />
         </LinearLayout>
     </LinearLayout>
 </LinearLayout>

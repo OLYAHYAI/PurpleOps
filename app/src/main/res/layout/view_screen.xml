@@ -1,68 +1,103 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Onglet « Écran » : écran du téléphone piloté depuis le PC par le câble USB (screenctl). -->
-<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
-    android:layout_width="match_parent"
-    android:layout_height="match_parent"
-    android:orientation="vertical">
+<!-- Onglet « Écran » (Neon Ops) : écran du téléphone piloté depuis le PC (screenctl),
+     par câble USB ou via Tailscale. -->
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent" android:layout_height="match_parent" android:scrollbars="none">
+<LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+    android:orientation="vertical" android:paddingBottom="16dp">
 
-    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
-        android:orientation="horizontal" android:gravity="center_vertical" android:paddingBottom="10dp">
-        <LinearLayout android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content"
-            android:orientation="vertical">
-            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
-                android:text="Écran" android:textColor="@color/neon"
-                android:textStyle="bold" android:textSize="20sp" android:letterSpacing="0.05" />
-            <TextView android:id="@+id/scrStatus" android:layout_width="match_parent" android:layout_height="wrap_content"
-                android:text="—" android:textColor="@color/muted" android:textSize="13sp" android:paddingTop="2dp" />
+    <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+        android:text="PILOTAGE PC · SCREENCTL" android:textColor="@color/muted" android:textSize="11sp"
+        android:fontFamily="@font/jetbrains_mono" android:letterSpacing="0.12" />
+    <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+        android:text="Écran" android:textColor="@color/text" android:textSize="22sp"
+        android:fontFamily="@font/space_grotesk" android:textStyle="bold" android:paddingBottom="14dp" />
+
+    <!-- Carte liaison -->
+    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical"
+        android:background="@drawable/hero" android:padding="18dp">
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:orientation="horizontal" android:gravity="center_vertical">
+            <ImageView android:layout_width="48dp" android:layout_height="48dp" android:padding="12dp"
+                android:background="@drawable/icon_box" android:src="@drawable/ic_phone" app:tint="@color/accent_soft"
+                android:importantForAccessibility="no" />
+            <View android:layout_width="0dp" android:layout_weight="1" android:layout_height="4dp"
+                android:background="@drawable/link_dash" android:layout_marginStart="8dp" android:layout_marginEnd="8dp" />
+            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="USB · TAILSCALE"
+                android:textColor="@color/accent_soft" android:textSize="10sp" android:fontFamily="@font/jetbrains_mono" />
+            <View android:layout_width="0dp" android:layout_weight="1" android:layout_height="4dp"
+                android:background="@drawable/link_dash" android:layout_marginStart="8dp" android:layout_marginEnd="8dp" />
+            <ImageView android:layout_width="48dp" android:layout_height="48dp" android:padding="12dp"
+                android:background="@drawable/icon_box" android:src="@drawable/ic_screen" app:tint="@color/ok_soft"
+                android:importantForAccessibility="no" />
         </LinearLayout>
-        <TextView android:id="@+id/scrToggle" android:layout_width="wrap_content" android:layout_height="wrap_content"
-            android:background="@drawable/btn_accent" android:gravity="center"
-            android:paddingStart="20dp" android:paddingEnd="20dp" android:paddingTop="12dp" android:paddingBottom="12dp"
-            android:text="ACTIVER" android:textColor="@color/text" android:textStyle="bold" android:textSize="14sp" />
+        <TextView android:id="@+id/scrStatus" android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:text="—" android:textColor="@color/text" android:textSize="15sp" android:textStyle="bold" android:paddingTop="16dp" />
+        <TextView android:id="@+id/scrInfo" android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:textColor="@color/muted" android:textSize="11.5sp" android:fontFamily="@font/jetbrains_mono"
+            android:lineSpacingExtra="3dp" android:paddingTop="4dp"
+            android:text="Sur le PC : double-clic sur screenview.exe (Release GitHub)." />
+        <TextView android:id="@+id/scrToggle" android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:background="@drawable/btn_accent" android:gravity="center" android:minHeight="52dp" android:layout_marginTop="16dp"
+            android:text="ACTIVER" android:textColor="@color/bg" android:textStyle="bold" android:textSize="15sp" />
     </LinearLayout>
 
-    <TextView android:id="@+id/scrInfo" android:layout_width="match_parent" android:layout_height="wrap_content"
-        android:background="@drawable/tile" android:padding="14dp" android:layout_marginBottom="10dp"
-        android:textColor="@color/text" android:textSize="14sp" android:lineSpacingExtra="4dp"
-        android:text="Sur le PC : double-clic sur screenview.exe (Release GitHub)." />
-
-    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
-        android:orientation="horizontal" android:paddingBottom="10dp">
-        <TextView android:id="@+id/scrPair" android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content"
-            android:background="@drawable/btn_neon" android:gravity="center" android:paddingTop="10dp" android:paddingBottom="10dp"
-            android:text="APPAIRER UN PC" android:textColor="@color/neon" android:textSize="13sp" android:layout_marginEnd="8dp" />
-        <TextView android:id="@+id/scrForget" android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content"
-            android:background="@drawable/btn_neon" android:gravity="center" android:paddingTop="10dp" android:paddingBottom="10dp"
-            android:text="OUBLIER LES PC" android:textColor="@color/danger" android:textSize="13sp" />
+    <!-- Réglages de la liaison -->
+    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical"
+        android:background="@drawable/card" android:layout_marginTop="12dp" android:paddingStart="14dp" android:paddingEnd="8dp"
+        android:paddingTop="4dp" android:paddingBottom="4dp">
+        <com.google.android.material.materialswitch.MaterialSwitch android:id="@+id/scrLan"
+            android:layout_width="match_parent" android:layout_height="wrap_content" android:minHeight="52dp"
+            android:text="Sans câble : via Tailscale (PC : screenview.exe &lt;ip&gt; 8099)"
+            android:textColor="@color/text" android:textSize="13sp" />
+        <View android:layout_width="match_parent" android:layout_height="1dp" android:background="@color/border" />
+        <com.google.android.material.materialswitch.MaterialSwitch android:id="@+id/scrAuto"
+            android:layout_width="match_parent" android:layout_height="wrap_content" android:minHeight="52dp"
+            android:text="Démarrer automatiquement (et laisser tourner appli fermée)"
+            android:textColor="@color/text" android:textSize="13sp" />
+        <View android:layout_width="match_parent" android:layout_height="1dp" android:background="@color/border" />
+        <com.google.android.material.materialswitch.MaterialSwitch android:id="@+id/scrDim"
+            android:layout_width="match_parent" android:layout_height="wrap_content" android:minHeight="52dp"
+            android:text="Éteindre l'écran du téléphone pendant le pilotage"
+            android:textColor="@color/text" android:textSize="13sp" />
+        <View android:layout_width="match_parent" android:layout_height="1dp" android:background="@color/border" />
+        <com.google.android.material.materialswitch.MaterialSwitch android:id="@+id/scrAi"
+            android:layout_width="match_parent" android:layout_height="wrap_content" android:minHeight="52dp"
+            android:text="Pilotage par l'IA (MCP : captures, lecture, gestes, texte)"
+            android:textColor="@color/text" android:textSize="13sp" />
     </LinearLayout>
 
-    <CheckBox android:id="@+id/scrAuto" android:layout_width="match_parent" android:layout_height="wrap_content"
-        android:text="Démarrer automatiquement (et laisser tourner quand l'appli est fermée)"
-        android:textColor="@color/text" android:textSize="13sp" android:buttonTint="@color/neon"
-        android:paddingBottom="6dp" />
-
-    <CheckBox android:id="@+id/scrDim" android:layout_width="match_parent" android:layout_height="wrap_content"
-        android:text="Éteindre l'écran du téléphone pendant le pilotage (économise la batterie)"
-        android:textColor="@color/text" android:textSize="13sp" android:buttonTint="@color/neon"
-        android:paddingBottom="6dp" />
-
-    <CheckBox android:id="@+id/scrAi" android:layout_width="match_parent" android:layout_height="wrap_content"
-        android:text="Autoriser le pilotage par l'IA (serveur MCP : captures, lecture de l'écran, gestes, texte)"
-        android:textColor="@color/text" android:textSize="13sp" android:buttonTint="@color/neon"
-        android:paddingBottom="6dp" />
-
-    <CheckBox android:id="@+id/scrLan" android:layout_width="match_parent" android:layout_height="wrap_content"
-        android:text="Sans câble : diffuser via Tailscale (sur le PC : screenview.exe &lt;ip-du-tel&gt; 8099)"
-        android:textColor="@color/text" android:textSize="13sp" android:buttonTint="@color/neon"
-        android:paddingBottom="6dp" />
-
+    <!-- PC appairés -->
+    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal"
+        android:gravity="center_vertical" android:paddingTop="18dp" android:paddingBottom="8dp">
+        <TextView android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content" android:text="PC appairés"
+            android:textColor="@color/text" android:textSize="15sp" android:fontFamily="@font/space_grotesk" android:textStyle="bold" />
+    </LinearLayout>
     <TextView android:id="@+id/scrPcs" android:layout_width="match_parent" android:layout_height="wrap_content"
-        android:text="PC appairés : —" android:textColor="@color/muted" android:textSize="12sp" android:paddingBottom="8dp" />
+        android:text="PC appairés : —" android:textColor="@color/muted" android:textSize="11.5sp"
+        android:fontFamily="@font/jetbrains_mono" android:paddingBottom="10dp" />
+    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal">
+        <TextView android:id="@+id/scrPair" android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content"
+            android:background="@drawable/btn_neon" android:gravity="center" android:minHeight="48dp"
+            android:text="Appairer un PC" android:textColor="@color/accent_on" android:textStyle="bold" android:textSize="13sp" android:layout_marginEnd="8dp" />
+        <TextView android:id="@+id/scrForget" android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content"
+            android:background="@drawable/btn_outline_danger" android:gravity="center" android:minHeight="48dp"
+            android:text="Oublier les PC…" android:textColor="@color/danger_soft" android:textStyle="bold" android:textSize="13sp" />
+    </LinearLayout>
 
-    <ScrollView android:id="@+id/scrLogScroll" android:layout_width="match_parent" android:layout_height="0dp"
-        android:layout_weight="1" android:background="@drawable/bg_console" android:padding="10dp">
-        <TextView android:id="@+id/scrLog" android:layout_width="match_parent" android:layout_height="wrap_content"
-            android:fontFamily="monospace" android:textSize="11sp" android:textColor="@color/console_text"
-            android:textIsSelectable="true" />
-    </ScrollView>
+    <!-- Journal -->
+    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical"
+        android:background="@drawable/bg_console" android:layout_marginTop="16dp">
+        <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="JOURNAL · SCREENCTL"
+            android:textColor="@color/muted" android:textSize="11sp" android:fontFamily="@font/jetbrains_mono" android:letterSpacing="0.12"
+            android:paddingStart="12dp" android:paddingTop="8dp" android:paddingEnd="12dp" android:paddingBottom="4dp" />
+        <ScrollView android:id="@+id/scrLogScroll" android:layout_width="match_parent" android:layout_height="150dp"
+            android:paddingStart="12dp" android:paddingEnd="12dp" android:paddingBottom="10dp" android:nestedScrollingEnabled="true">
+            <TextView android:id="@+id/scrLog" android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:fontFamily="@font/jetbrains_mono" android:textSize="11sp" android:textColor="@color/console_text"
+                android:textIsSelectable="true" />
+        </ScrollView>
+    </LinearLayout>
 </LinearLayout>
+</ScrollView>

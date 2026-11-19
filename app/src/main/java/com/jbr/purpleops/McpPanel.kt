@@ -2,7 +2,7 @@ package com.jbr.purpleops
 
 import android.content.Context
 import android.view.View
-import android.widget.CheckBox
+import android.widget.CompoundButton
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
 import kotlinx.coroutines.CoroutineScope
@@ -30,7 +30,7 @@ class McpPanel(
 ) {
     private val status: TextView = root.findViewById(R.id.mcpStatus)
     private val toggle: TextView = root.findViewById(R.id.mcpToggle)
-    private val auto: CheckBox = root.findViewById(R.id.mcpAuto)
+    private val auto: CompoundButton = root.findViewById(R.id.mcpAuto)
     private val updateBtn: TextView = root.findViewById(R.id.mcpUpdate)
     private val prefs = act.getSharedPreferences("purpleops", Context.MODE_PRIVATE)
 
@@ -81,7 +81,9 @@ class McpPanel(
                     (if (tail.isNotBlank()) "\nDernière sortie : " + tail.trim().lines().takeLast(3).joinToString(" / ") else "")
             }
         }
-        toggle.text = if (running) "ARRÊTER" else "DÉMARRER"
+        toggle.text = if (running) "Arrêter" else "Démarrer"
+        toggle.setBackgroundResource(if (running) R.drawable.btn_outline_danger else R.drawable.btn_accent)
+        toggle.setTextColor(androidx.core.content.ContextCompat.getColor(toggle.context, if (running) R.color.danger_soft else R.color.bg))
         return chroot
     }
 

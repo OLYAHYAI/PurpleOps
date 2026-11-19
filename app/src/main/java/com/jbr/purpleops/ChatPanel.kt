@@ -69,6 +69,7 @@ class ChatPanel(
     private val input: EditText = root.findViewById(R.id.chatInput)
     private val sendBtn: TextView = root.findViewById(R.id.chatSend)
 
+    private val n = Neon(act)
     private val cText = ContextCompat.getColor(act, R.color.text)
     private val cMuted = ContextCompat.getColor(act, R.color.muted)
     private val cNeon = ContextCompat.getColor(act, R.color.neon)
@@ -97,7 +98,8 @@ class ChatPanel(
     private fun dp(v: Int) = (v * act.resources.displayMetrics.density).toInt()
 
     init {
-        root.findViewById<View>(R.id.chatBack).visibility = View.GONE   // onglet de la barre : pas de retour ici
+        // Onglet de la barre : pas de retour ; la pastille « # » est décorative (icône du salon).
+        root.findViewById<View>(R.id.chatBack).apply { isClickable = false; importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO }
         root.findViewById<View>(R.id.chatMenu).setOnClickListener { menu() }
         root.findViewById<View>(R.id.chatConnect).setOnClickListener { login() }
         root.findViewById<View>(R.id.chatReplyCancel).setOnClickListener { setReply(null) }
@@ -262,9 +264,9 @@ class ChatPanel(
             agentsRow.addView(TextView(act).apply {
                 text = "@${local(uid)}"
                 setTextColor(if (local(uid) == "paperclip") cMuted else cCyan)
-                textSize = 12.5f
-                setBackgroundResource(R.drawable.btn_neon)
-                setPadding(dp(12), dp(7), dp(12), dp(7))
+                textSize = 12f; typeface = n.mono
+                setBackgroundResource(R.drawable.chip_root)
+                setPadding(dp(12), dp(8), dp(12), dp(8))
                 layoutParams = LinearLayout.LayoutParams(-2, -2).apply { marginEnd = dp(6) }
                 setOnClickListener { insertMention(uid) }
             })
@@ -300,8 +302,9 @@ class ChatPanel(
             if (day != lastDay) {
                 lastDay = day
                 list.addView(TextView(act).apply {
-                    text = day; setTextColor(cMuted); textSize = 11f; gravity = Gravity.CENTER
-                    setPadding(0, dp(8), 0, dp(6))
+                    text = day.uppercase(); setTextColor(cMuted); textSize = 10.5f; gravity = Gravity.CENTER
+                    typeface = n.mono; letterSpacing = 0.12f
+                    setPadding(0, dp(10), 0, dp(8))
                     layoutParams = LinearLayout.LayoutParams(-1, -2)
                 })
             }
@@ -315,42 +318,52 @@ class ChatPanel(
     private fun bubble(m: MatrixClient.Msg, parent: MatrixClient.Msg?): View {
         val mine = m.sender == me()
         val forMe = !mine && me() in m.mentions
+        val decision = isBridge(m.sender) && m.decisionIssue != null
+        val r = n.dpf(14f); val sharp = n.dpf(4f)
         val box = LinearLayout(act).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(12), dp(8), dp(12), dp(9))
-            background = GradientDrawable().apply {
-                cornerRadius = dp(12).toFloat()
-                setColor(if (mine) cSurface2 else cSurface)
-                setStroke(dp(1), if (forMe) cNeon else Color.parseColor("#1E2731"))
+            setPadding(dp(12), dp(10), dp(12), dp(11))
+            background = if (decision) ContextCompat.getDrawable(act, R.drawable.hero) else GradientDrawable().apply {
+                // Coin « pointe » côté émetteur, comme sur la maquette.
+                cornerRadii = if (mine) floatArrayOf(r, r, sharp, sharp, r, r, r, r) else floatArrayOf(sharp, sharp, r, r, r, r, r, r)
+                setColor(if (mine) n.fade(cNeon, 0.12f) else cSurface)
+                setStroke(dp(1), when { forMe -> cNeon; mine -> n.fade(cNeon, 0.35f); else -> n.border })
             }
+            if (decision) { elevation = n.dpf(6f); outlineSpotShadowColor = cNeon; outlineAmbientShadowColor = cNeon }
             layoutParams = LinearLayout.LayoutParams(-1, -2).apply {
-                bottomMargin = dp(6)
-                if (mine) marginStart = dp(36) else marginEnd = dp(36)
+                bottomMargin = dp(10)
+                if (!decision) { if (mine) marginStart = dp(40) else marginEnd = dp(40) }
             }
             setOnClickListener { setReply(m) }
             setOnLongClickListener { actions(m); true }
         }
         val head = LinearLayout(act).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
         head.addView(TextView(act).apply {
-            text = if (mine) "moi" else name(m.sender)
-            setTextColor(when { mine -> cNeon; local(m.sender) == "paperclip" -> cMuted; else -> cCyan })
-            textSize = 12.5f; setTypeface(null, Typeface.BOLD)
+            text = when {
+                decision -> "DÉCISION · ASK FIRST · ${m.decisionIssue}"
+                mine -> "moi"
+                else -> name(m.sender)
+            }
+            setTextColor(when { decision || mine -> n.accentSoft; local(m.sender) == "paperclip" -> cMuted; else -> cCyan })
+            textSize = 11f; typeface = n.monoBold; if (decision) letterSpacing = 0.08f
             layoutParams = LinearLayout.LayoutParams(0, -2, 1f)
         })
-        head.addView(TextView(act).apply { text = hhmm.format(Date(m.ts)); setTextColor(cMuted); textSize = 10.5f })
+        head.addView(TextView(act).apply { text = hhmm.format(Date(m.ts)); setTextColor(cMuted); textSize = 10.5f; typeface = n.mono })
         box.addView(head)
         if (m.replyTo != null) box.addView(TextView(act).apply {
             text = if (parent != null) "↪ ${if (parent.sender == me()) "moi" else name(parent.sender)} : ${parent.body.replace('\n', ' ').take(90)}"
             else "↪ réponse à un message plus ancien"
             setTextColor(cMuted); textSize = 11f; maxLines = 2
-            setPadding(0, dp(3), 0, dp(1))
+            setPadding(dp(8), dp(4), 0, dp(4))
+            background = GradientDrawable().apply { setColor(n.fade(cMuted, 0.06f)); cornerRadius = n.dpf(6f) }
+            layoutParams = LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(6) }
         })
         box.addView(TextView(act).apply {
             text = m.body
-            setTextColor(if (m.notice) cMuted else cText)
-            textSize = if (m.notice) 12.5f else 14f
-            if (m.notice) setTypeface(null, Typeface.ITALIC)
-            setPadding(0, dp(3), 0, 0)
+            setTextColor(if (m.notice) n.soft else cText)
+            textSize = if (m.notice) 13f else 14f
+            setLineSpacing(n.dpf(2f), 1f)
+            setPadding(0, dp(6), 0, 0)
             // Pas d'autoLink : le contenu des agents est une donnée.
         })
         if (isBridge(m.sender)) bridgeActions(m)?.let { box.addView(it) }
@@ -368,18 +381,19 @@ class ChatPanel(
             orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
             setPadding(0, dp(8), 0, 0)
         }
-        fun btn(label: String, color: Int, onClick: () -> Unit) = TextView(act).apply {
-            text = label; setTextColor(color); textSize = 12.5f; setTypeface(null, Typeface.BOLD)
-            setBackgroundResource(R.drawable.btn_neon); gravity = Gravity.CENTER
-            setPadding(dp(12), dp(8), dp(12), dp(8))
-            layoutParams = LinearLayout.LayoutParams(-2, -2).apply { marginEnd = dp(8) }
+        row.setPadding(0, dp(12), 0, 0)
+        fun btn(label: String, bg: Int, color: Int, grow: Boolean, onClick: () -> Unit) = TextView(act).apply {
+            text = label; setTextColor(color); textSize = 13.5f; setTypeface(null, Typeface.BOLD)
+            setBackgroundResource(bg); gravity = Gravity.CENTER
+            minHeight = dp(46); setPadding(dp(12), dp(8), dp(12), dp(8))
+            layoutParams = (if (grow) LinearLayout.LayoutParams(0, -2, 1f) else LinearLayout.LayoutParams(-2, -2)).apply { marginEnd = dp(8) }
             setOnClickListener { onClick() }
         }
         if (decision != null) {
-            row.addView(btn("✓ Valider", cOk) { decide(m, decision, true) })
-            row.addView(btn("✕ Refuser", cCrit) { decide(m, decision, false) })
+            row.addView(btn("Valider", R.drawable.btn_ok, n.c(R.color.ok_soft), true) { decide(m, decision, true) })
+            row.addView(btn("Refuser…", R.drawable.btn_ghost, cText, true) { decide(m, decision, false) })
         }
-        if (ticket != null) row.addView(btn("${ticket.groupValues[1]} ↗", cCyan) {
+        if (ticket != null) row.addView(btn("${ticket.groupValues[1]} ↗", R.drawable.btn_neon, n.c(R.color.accent_on), decision == null) {
             try { act.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(ticket.value))) } catch (e: Exception) { toast("Aucun navigateur") }
         })
         return row
@@ -390,21 +404,15 @@ class ChatPanel(
         val count = m.decisionCount.coerceAtLeast(1)
         val pick: (Int?) -> Unit = { n ->
             if (accept) {
-                AlertDialog.Builder(act)
-                    .setTitle("Valider ${if (n != null) "la décision $n de " else ""}$issue ?")
-                    .setMessage("L'agent exécutera l'action demandée. La décision est tracée dans Wazuh et dans Paperclip.")
-                    .setPositiveButton("Valider") { _, _ -> sendDecision(m, issue, true, n, "") }
-                    .setNegativeButton("Annuler", null).show()
+                ConfirmSheet(act, "Valider ${if (n != null) "la décision $n de " else ""}$issue ?", "Valider")
+                    .kicker("DÉCISION · ASK FIRST").tone(ConfirmSheet.Tone.ACCENT)
+                    .message("L'agent exécutera l'action demandée. La décision est tracée dans Wazuh et dans Paperclip.")
+                    .show { sendDecision(m, issue, true, n, "") }
             } else {
-                val reason = EditText(act).apply {
-                    hint = "Raison (facultative)"; setTextColor(cText); setHintTextColor(cMuted); setSingleLine()
-                }
-                val box = LinearLayout(act).apply { setPadding(dp(20), dp(8), dp(20), 0); addView(reason, LinearLayout.LayoutParams(-1, -2)) }
-                AlertDialog.Builder(act)
-                    .setTitle("Refuser ${if (n != null) "la décision $n de " else ""}$issue ?")
-                    .setView(box)
-                    .setPositiveButton("Refuser") { _, _ -> sendDecision(m, issue, false, n, reason.text.toString().trim()) }
-                    .setNegativeButton("Annuler", null).show()
+                ConfirmSheet(act, "Refuser ${if (n != null) "la décision $n de " else ""}$issue ?", "Refuser")
+                    .kicker("DÉCISION · ASK FIRST")
+                    .field("reason", "Raison (facultative)", "ex : pas maintenant, cible hors périmètre")
+                    .show { v -> sendDecision(m, issue, false, n, v["reason"].orEmpty()) }
             }
         }
         if (count <= 1) pick(null)
