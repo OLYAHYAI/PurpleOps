@@ -321,7 +321,7 @@ class ChatPanel(
             background = GradientDrawable().apply {
                 cornerRadius = dp(12).toFloat()
                 setColor(if (mine) cSurface2 else cSurface)
-                setStroke(dp(1), if (forMe) cNeon else Color.parseColor("#241C3A"))
+                setStroke(dp(1), if (forMe) cNeon else Color.parseColor("#1E2731"))
             }
             layoutParams = LinearLayout.LayoutParams(-1, -2).apply {
                 bottomMargin = dp(6)

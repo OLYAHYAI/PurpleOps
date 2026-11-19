@@ -47,7 +47,7 @@ class HomePanel(
     private val cText = ContextCompat.getColor(act, R.color.text)
     private val cMuted = ContextCompat.getColor(act, R.color.muted)
     private val cNeon = ContextCompat.getColor(act, R.color.neon)
-    private val cTrack = Color.parseColor("#2A2238")
+    private val cTrack = Color.parseColor("#1E2731")
 
     private var metrics: Metrics? = null
     private var wz: WzSummary? = null
@@ -371,10 +371,10 @@ class HomePanel(
         if (right.isNotEmpty()) addView(text(right, 11.5f, cMuted))
     }
 
-    private fun note(s: String) = text(s, 11f, Color.parseColor("#6F6884")).apply { setPadding(0, dp(6), 0, 0) }
+    private fun note(s: String) = text(s, 11f, Color.parseColor("#7D8A98")).apply { setPadding(0, dp(6), 0, 0) }
 
     private fun chip(s: String, color: Int) = text(s, 11f, color).apply {
-        background = GradientDrawable().apply { cornerRadius = dp(10).toFloat(); setColor(Color.parseColor("#1E1830")); setStroke(dp(1), adjustAlpha(color, 0.45f)) }
+        background = GradientDrawable().apply { cornerRadius = dp(10).toFloat(); setColor(Color.parseColor("#121820")); setStroke(dp(1), adjustAlpha(color, 0.45f)) }
         setPadding(dp(8), dp(3), dp(8), dp(3))
         layoutParams = LinearLayout.LayoutParams(-2, -2).apply { marginEnd = dp(6) }
     }
@@ -438,7 +438,7 @@ class HomePanel(
 
     private fun alertRow(level: Int, t: String, desc: String) = row().apply {
         setPadding(0, dp(7), 0, 0)
-        addView(text("$level", 12f, Color.parseColor("#120E1A"), bold = true).apply {
+        addView(text("$level", 12f, Color.parseColor("#0A0E13"), bold = true).apply {
             gravity = Gravity.CENTER
             background = GradientDrawable().apply { cornerRadius = dp(6).toFloat(); setColor(levelColorForRule(level)) }
             layoutParams = LinearLayout.LayoutParams(dp(28), -2).apply { marginEnd = dp(8) }

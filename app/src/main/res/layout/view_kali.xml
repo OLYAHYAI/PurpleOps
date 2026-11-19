@@ -4,21 +4,40 @@
     android:layout_height="match_parent"
     android:orientation="vertical">
 
+    <!-- En-tête « Opérations » commun à Outils et Radio. -->
     <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
-        android:orientation="horizontal" android:gravity="center_vertical" android:paddingBottom="8dp">
-        <TextView android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content"
-            android:text="Kali — console" android:textColor="@color/neon" android:textStyle="bold"
-            android:textSize="18sp" android:letterSpacing="0.05" />
-        <TextView android:id="@+id/radioBtn" android:layout_width="wrap_content" android:layout_height="wrap_content"
-            android:background="@drawable/btn_neon" android:paddingStart="12dp" android:paddingEnd="12dp"
-            android:paddingTop="6dp" android:paddingBottom="6dp" android:text="📡 Radio" android:textColor="@color/cyan"
-            android:textSize="12sp" android:layout_marginEnd="8dp" />
+        android:orientation="horizontal" android:gravity="center_vertical" android:paddingBottom="10dp">
+        <LinearLayout android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content" android:orientation="vertical">
+            <TextView android:id="@+id/opsKicker" android:layout_width="wrap_content" android:layout_height="wrap_content"
+                android:text="OPÉRATIONS · CHROOT KALI" android:textColor="@color/muted" android:textSize="11sp"
+                android:fontFamily="monospace" android:letterSpacing="0.12" />
+            <TextView android:id="@+id/opsTitle" android:layout_width="wrap_content" android:layout_height="wrap_content"
+                android:text="Kali" android:textColor="@color/text" android:textStyle="bold" android:textSize="22sp" />
+        </LinearLayout>
         <TextView android:id="@+id/rootChip" android:layout_width="wrap_content" android:layout_height="wrap_content"
-            android:background="@drawable/chip_root" android:text="root ?" android:textColor="@color/neon" android:textSize="12sp" />
+            android:background="@drawable/chip_root" android:text="ROOT ?" android:textColor="@color/accent_soft"
+            android:textSize="11sp" android:fontFamily="monospace" />
     </LinearLayout>
 
+    <!-- Sélecteur Outils | Radio (remplace l'ancien bouton « 📡 Radio » et sa boîte de dialogue). -->
+    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:orientation="horizontal" android:background="@drawable/bg_segment" android:layout_marginBottom="12dp">
+        <TextView android:id="@+id/segTools" android:layout_width="0dp" android:layout_weight="1" android:layout_height="40dp"
+            android:gravity="center" android:background="@drawable/seg_item" android:text="Outils"
+            android:textColor="@color/seg_text" android:textStyle="bold" android:textSize="13sp" android:clickable="true" android:focusable="true" />
+        <TextView android:id="@+id/segRadio" android:layout_width="0dp" android:layout_weight="1" android:layout_height="40dp"
+            android:gravity="center" android:background="@drawable/seg_item" android:text="Radio"
+            android:textColor="@color/seg_text" android:textStyle="bold" android:textSize="13sp" android:clickable="true" android:focusable="true" />
+    </LinearLayout>
+
+    <include android:id="@+id/radioView" layout="@layout/view_radio"
+        android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1" android:visibility="gone" />
+
+    <LinearLayout android:id="@+id/kaliTools" android:layout_width="match_parent" android:layout_height="0dp"
+        android:layout_weight="1" android:orientation="vertical">
+
     <EditText android:id="@+id/targetInput" android:layout_width="match_parent" android:layout_height="wrap_content"
-        android:background="@drawable/bg_input" android:hint="Cible — IP / host de TON perimetre"
+        android:background="@drawable/bg_input" android:hint="Cible — IP / hôte de TON périmètre" android:fontFamily="monospace" android:textSize="13sp"
         android:textColorHint="@color/muted" android:textColor="@color/text" android:inputType="textNoSuggestions"
         android:maxLines="1" android:importantForAutofill="no" />
 
@@ -29,7 +48,7 @@
             android:paddingTop="6dp" android:paddingBottom="6dp" android:text="‹" android:textColor="@color/neon"
             android:textSize="16sp" android:visibility="gone" />
         <TextView android:id="@+id/breadcrumb" android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content"
-            android:paddingStart="10dp" android:text="Catalogue" android:textColor="@color/cyan" android:textSize="13sp" />
+            android:paddingStart="10dp" android:text="Catalogue" android:textColor="@color/accent_soft" android:textSize="12sp" android:fontFamily="monospace" />
     </LinearLayout>
 
     <ScrollView android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1.3" android:scrollbars="none">
@@ -39,17 +58,17 @@
     <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
         android:orientation="horizontal" android:gravity="center_vertical" android:paddingTop="6dp">
         <TextView android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content"
-            android:text="CONSOLE" android:textColor="@color/muted" android:textSize="11sp" android:letterSpacing="0.2" />
+            android:text="CONSOLE" android:textColor="@color/muted" android:textSize="11sp" android:letterSpacing="0.12" android:fontFamily="monospace" />
         <TextView android:id="@+id/stopButton" android:layout_width="wrap_content" android:layout_height="wrap_content"
-            android:background="@drawable/btn_neon" android:paddingStart="16dp" android:paddingEnd="16dp"
-            android:paddingTop="6dp" android:paddingBottom="6dp" android:text="STOP" android:textColor="@color/danger"
+            android:background="@drawable/btn_outline_danger" android:paddingStart="14dp" android:paddingEnd="14dp"
+            android:paddingTop="8dp" android:paddingBottom="8dp" android:text="STOP" android:textColor="@color/danger_soft" android:fontFamily="monospace"
             android:textSize="12sp" android:layout_marginEnd="8dp" />
         <TextView android:id="@+id/clearButton" android:layout_width="wrap_content" android:layout_height="wrap_content"
             android:background="@drawable/btn_neon" android:paddingStart="16dp" android:paddingEnd="16dp"
-            android:paddingTop="6dp" android:paddingBottom="6dp" android:text="CLEAR" android:textColor="@color/neon" android:textSize="12sp" />
+            android:paddingTop="8dp" android:paddingBottom="8dp" android:text="CLEAR" android:textColor="@color/text_soft" android:fontFamily="monospace" android:textSize="12sp" />
         <TextView android:id="@+id/askSocButton" android:layout_width="wrap_content" android:layout_height="wrap_content"
             android:background="@drawable/btn_neon" android:paddingStart="16dp" android:paddingEnd="16dp" android:layout_marginStart="8dp"
-            android:paddingTop="6dp" android:paddingBottom="6dp" android:text="→ #soc" android:textColor="@color/cyan" android:textSize="12sp" />
+            android:paddingTop="8dp" android:paddingBottom="8dp" android:text="→ #soc" android:textColor="@color/accent_soft" android:fontFamily="monospace" android:textSize="12sp" />
     </LinearLayout>
 
     <ScrollView android:id="@+id/consoleScroll" android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1.2"
@@ -61,10 +80,11 @@
     <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
         android:orientation="horizontal" android:paddingTop="8dp" android:gravity="center_vertical">
         <EditText android:id="@+id/cmdInput" android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content"
-            android:background="@drawable/bg_input" android:hint="commande libre (ex: nmap -A {T})" android:textColorHint="@color/muted"
+            android:background="@drawable/bg_input" android:hint="commande libre (ex : nmap -A {T})" android:fontFamily="monospace" android:textSize="12sp" android:textColorHint="@color/muted"
             android:textColor="@color/text" android:inputType="textNoSuggestions" android:maxLines="1" android:importantForAutofill="no" android:layout_marginEnd="8dp" />
         <TextView android:id="@+id/runButton" android:layout_width="wrap_content" android:layout_height="wrap_content"
             android:background="@drawable/btn_accent" android:paddingStart="22dp" android:paddingEnd="22dp" android:paddingTop="12dp"
-            android:paddingBottom="12dp" android:text="RUN" android:textStyle="bold" android:textColor="#0B0A12" android:textSize="13sp" />
+            android:paddingBottom="12dp" android:text="RUN" android:textStyle="bold" android:textColor="#0A0E13" android:textSize="13sp" />
+    </LinearLayout>
     </LinearLayout>
 </LinearLayout>

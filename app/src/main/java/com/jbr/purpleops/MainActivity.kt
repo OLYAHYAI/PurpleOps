@@ -84,7 +84,12 @@ class MainActivity : AppCompatActivity() {
             val sb = insets.getInsets(WindowInsetsCompat.Type.systemBars())
             val ime = insets.getInsets(WindowInsetsCompat.Type.ime())
             contentArea.setPadding(dp(12), sb.top + dp(6), dp(12), dp(6))
-            bottomNav.setPadding(0, 0, 0, maxOf(sb.bottom, ime.bottom))
+            // Barre flottante : la marge (et non le padding) absorbe la barre système,
+            // pour que la pastille reste entière au-dessus des gestes.
+            (bottomNav.layoutParams as ViewGroup.MarginLayoutParams).let { lp ->
+                val m = maxOf(sb.bottom, ime.bottom) + dp(10)
+                if (lp.bottomMargin != m) { lp.bottomMargin = m; bottomNav.layoutParams = lp }
+            }
             insets
         }
 
@@ -183,9 +188,12 @@ class MainActivity : AppCompatActivity() {
         consoleScroll = findViewById(R.id.consoleScroll)
         rootChip = findViewById(R.id.rootChip)
 
-        // Écran radio (wol-pi) : contrôle du capteur WIDS via le webhook n8n.
-        radio = try { RadioPanel(this, ui) } catch (e: Exception) { null }
-        findViewById<View>(R.id.radioBtn).setOnClickListener { radio?.open() }
+        // Kali › Radio (wol-pi) : écran du capteur WIDS via le webhook n8n,
+        // derrière le sélecteur Outils | Radio (plus de boîte de dialogue).
+        radio = try { RadioPanel(this, findViewById(R.id.radioView), ui) } catch (e: Exception) { null }
+        findViewById<View>(R.id.segTools).setOnClickListener { showOps(radio = false) }
+        findViewById<View>(R.id.segRadio).setOnClickListener { showOps(radio = true) }
+        showOps(radio = false)
 
         targetInput.setText(getSharedPreferences("purpleops", MODE_PRIVATE).getString("target", ""))
         runButton.setOnClickListener { runFree() }
@@ -200,12 +208,25 @@ class MainActivity : AppCompatActivity() {
         loadCatalog()
     }
 
+    /** Sous-onglet de Kali : Outils (catalogue + console) ou Radio. */
+    private fun showOps(radio: Boolean) {
+        findViewById<View>(R.id.segTools).isSelected = !radio
+        findViewById<View>(R.id.segRadio).isSelected = radio
+        findViewById<View>(R.id.kaliTools).visibility = if (radio) View.GONE else View.VISIBLE
+        findViewById<View>(R.id.radioView).visibility = if (radio) View.VISIBLE else View.GONE
+        findViewById<TextView>(R.id.opsKicker).text = if (radio) "OPÉRATIONS · WIDS WOL-PI" else "OPÉRATIONS · CHROOT KALI"
+        findViewById<TextView>(R.id.opsTitle).text = if (radio) "Radio" else "Kali"
+        findViewById<View>(R.id.rootChip).visibility = if (radio) View.GONE else View.VISIBLE
+        if (radio) this.radio?.onShown()
+    }
+
     private fun checkRoot() {
         ui.launch {
             val (_, out) = RootRunner.runAndroidRoot("id")
             val ok = out.contains("uid=0")
-            rootChip.text = if (ok) "root ✓" else "root ✗"
-            rootChip.setTextColor(Color.parseColor(if (ok) "#5CFFA6" else "#FF5C7A"))
+            rootChip.text = if (ok) "ROOT OK" else "ROOT ✗"
+            rootChip.setBackgroundResource(if (ok) R.drawable.chip_ok else R.drawable.chip_danger)
+            rootChip.setTextColor(ContextCompat.getColor(this@MainActivity, if (ok) R.color.ok_soft else R.color.danger_soft))
         }
     }
 
@@ -266,9 +287,9 @@ class MainActivity : AppCompatActivity() {
         row.layoutParams = LinearLayout.LayoutParams(
             ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
         ).apply { bottomMargin = dp(8) }
-        row.addView(TextView(this).apply { text = title; setTextColor(Color.parseColor("#EDE9F5")); textSize = 15f })
+        row.addView(TextView(this).apply { text = title; setTextColor(Color.parseColor("#E6EDF3")); textSize = 15f })
         if (!subtitle.isNullOrBlank()) row.addView(TextView(this).apply {
-            text = subtitle; setTextColor(Color.parseColor("#8A7FA5")); textSize = 11f; typeface = Typeface.MONOSPACE
+            text = subtitle; setTextColor(Color.parseColor("#8B98A6")); textSize = 11f; typeface = Typeface.MONOSPACE
         })
         contentList.addView(row)
     }
@@ -278,9 +299,9 @@ class MainActivity : AppCompatActivity() {
         val container = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(20), dp(8), dp(20), 0) }
         val inputs = HashMap<String, EditText>()
         for (p in a.params) {
-            container.addView(TextView(this).apply { text = p.hint; setTextColor(Color.parseColor("#8A7FA5")); textSize = 12f })
+            container.addView(TextView(this).apply { text = p.hint; setTextColor(Color.parseColor("#8B98A6")); textSize = 12f })
             val et = EditText(this).apply {
-                setText(p.def); setTextColor(Color.parseColor("#EDE9F5")); setHintTextColor(Color.parseColor("#8A7FA5")); setSingleLine()
+                setText(p.def); setTextColor(Color.parseColor("#E6EDF3")); setHintTextColor(Color.parseColor("#8B98A6")); setSingleLine()
             }
             inputs[p.name] = et; container.addView(et)
         }
@@ -376,7 +397,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun addInfo(parent: LinearLayout, text: String) {
         parent.addView(TextView(this).apply {
-            this.text = text; setTextColor(Color.parseColor("#8A7FA5")); textSize = 13f
+            this.text = text; setTextColor(Color.parseColor("#8B98A6")); textSize = 13f
             setPadding(dp(4), dp(8), dp(4), dp(8))
         })
     }
@@ -398,8 +419,8 @@ class MainActivity : AppCompatActivity() {
 
         val col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         col.layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
-        col.addView(TextView(this).apply { text = title; setTextColor(Color.parseColor("#EDE9F5")); textSize = 14f; setTypeface(null, Typeface.BOLD) })
-        col.addView(TextView(this).apply { text = subtitle; setTextColor(Color.parseColor("#8A7FA5")); textSize = 11f })
+        col.addView(TextView(this).apply { text = title; setTextColor(Color.parseColor("#E6EDF3")); textSize = 14f; setTypeface(null, Typeface.BOLD) })
+        col.addView(TextView(this).apply { text = subtitle; setTextColor(Color.parseColor("#8B98A6")); textSize = 11f })
         row.addView(col)
         parent.addView(row)
     }
@@ -425,6 +446,15 @@ class MainActivity : AppCompatActivity() {
         idxUser.setText(p.getString("wz_idx_user", ""))
         idxPass.setText(SecureStore.get(this, "wz_idx_pass"))
         version.text = "PurpleOps v${BuildConfig.VERSION_NAME} (code ${BuildConfig.VERSION_CODE})"
+
+        // Webhook n8n de l'écran Radio (déplacé depuis l'ancienne boîte de dialogue).
+        val radioUrl = findViewById<EditText>(R.id.cfgRadioUrl)
+        radioUrl.setText(RadioClient.url(applicationContext))
+        findViewById<View>(R.id.cfgRadioSave).setOnClickListener {
+            RadioClient.setUrl(applicationContext, radioUrl.text.toString())
+            radioUrl.setText(RadioClient.url(applicationContext))
+            toast("URL du webhook radio enregistrée")
+        }
 
         save.setOnClickListener {
             val newHost = host.text.toString().trim()

@@ -2,7 +2,7 @@
 <ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent" android:layout_height="match_parent" android:scrollbars="none">
     <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical">
-        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Reglages"
+        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Réglages"
             android:textColor="@color/text" android:textStyle="bold" android:textSize="20sp" android:paddingBottom="12dp" />
 
         <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Connexion Wazuh (via Tailscale)"
@@ -76,17 +76,28 @@
                 android:background="@drawable/btn_neon" android:gravity="center" android:padding="10dp" android:layout_marginEnd="8dp"
                 android:text="TESTER" android:textColor="@color/neon" android:textSize="12sp" />
             <TextView android:id="@+id/wolForget" android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content"
-                android:background="@drawable/btn_neon" android:gravity="center" android:padding="10dp"
-                android:text="OUBLIER" android:textColor="@color/danger" android:textSize="12sp" />
+                android:background="@drawable/btn_outline_danger" android:gravity="center" android:padding="10dp"
+                android:text="OUBLIER" android:textColor="@color/danger_soft" android:textSize="12sp" />
         </LinearLayout>
         <TextView android:id="@+id/wolKeyLine" android:layout_width="match_parent" android:layout_height="wrap_content"
             android:text="" android:textColor="@color/console_text" android:textSize="11sp" android:fontFamily="monospace"
             android:background="@drawable/bg_console" android:padding="10dp" android:layout_marginTop="8dp"
             android:textIsSelectable="true" android:visibility="gone" />
 
+        <!-- Écran Radio (Kali › Radio) : webhook n8n « WIDS radio control ». -->
+        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Radio (webhook n8n)"
+            android:textColor="@color/neon" android:textSize="13sp" android:paddingTop="18dp" android:paddingBottom="4dp" />
+        <EditText android:id="@+id/cfgRadioUrl" android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:background="@drawable/bg_input" android:textColor="@color/text" android:textColorHint="@color/muted"
+            android:hint="https://…/webhook/wids-ctl" android:inputType="textUri" android:maxLines="1"
+            android:textSize="12sp" android:fontFamily="monospace" android:importantForAutofill="no" />
+        <TextView android:id="@+id/cfgRadioSave" android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:background="@drawable/btn_neon" android:gravity="center" android:padding="12dp" android:layout_marginTop="8dp"
+            android:text="ENREGISTRER L'URL" android:textColor="@color/accent_on" android:textSize="12sp" />
+
         <TextView android:id="@+id/cfgVersion" android:layout_width="wrap_content" android:layout_height="wrap_content"
             android:text="" android:textColor="@color/muted" android:textSize="11sp" android:paddingTop="18dp" />
         <TextView android:id="@+id/cfgCheckUpdate" android:layout_width="wrap_content" android:layout_height="wrap_content"
-            android:text="Chercher une mise a jour" android:textColor="@color/cyan" android:textSize="13sp" android:paddingTop="8dp" />
+            android:text="Chercher une mise à jour" android:textColor="@color/cyan" android:textSize="13sp" android:paddingTop="8dp" />
     </LinearLayout>
 </ScrollView>
