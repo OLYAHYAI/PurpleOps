@@ -1,19 +1,49 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- Système « Neon Ops » (refonte 19/11) : neutres et couleurs d'état de
+     soc-display, violet PurpleOps en ACCENT (contour, halo, état actif), jamais
+     en fond plein. Les anciens noms (neon, cyan, magenta…) sont gardés pour ne
+     rien casser ; ils pointent sur les nouvelles valeurs. -->
 <resources>
-    <color name="bg">#0B0A12</color>
-    <color name="surface">#15121F</color>
-    <color name="surface2">#1E1830</color>
-    <color name="surface_press">#2A1F45</color>
-    <color name="neon">#B388FF</color>
-    <color name="neon_strong">#9A6BFF</color>
-    <color name="magenta">#E65CFF</color>
-    <color name="cyan">#5CF2FF</color>
-    <color name="text">#EDE9F5</color>
-    <color name="muted">#8A7FA5</color>
+    <!-- Neutres -->
+    <color name="bg">#07090D</color>
+    <color name="surface">#121820</color>
+    <color name="surface2">#1B232D</color>
+    <color name="surface_press">#241C3A</color>
+    <color name="surface_focus">#1B1430</color>
+    <color name="border">#1E2731</color>
+    <color name="border_strong">#3A4654</color>
+    <color name="text">#E6EDF3</color>
+    <color name="text_soft">#B7C2CE</color>
+    <color name="muted">#8B98A6</color>
+    <color name="faint">#7D8A98</color>
+
+    <!-- Accent -->
+    <color name="accent">#A37BFF</color>
+    <color name="accent_strong">#7C56D6</color>
+    <color name="accent_soft">#C9B3FF</color>
+    <color name="accent_on">#E6DCFF</color>
+    <color name="accent_veil">#1FA37BFF</color>
+    <color name="accent_line">#59A37BFF</color>
+
+    <!-- États (même sémantique que soc-display) -->
+    <color name="ok">#2ECC71</color>
+    <color name="ok_soft">#9FF0C0</color>
+    <color name="warn">#F5A524</color>
+    <color name="warn_soft">#F5C36A</color>
+    <color name="danger">#FF4D5E</color>
+    <color name="danger_soft">#FF8590</color>
+    <color name="danger_strong">#D93A4B</color>
+    <color name="info">#4DA3FF</color>
+
+    <!-- Console Kali -->
     <color name="console_bg">#07060D</color>
     <color name="console_text">#9DFFC4</color>
-    <color name="danger">#FF4D5E</color>
-    <color name="warn">#F5A524</color>
-    <color name="ok">#2ECC71</color>
-    <color name="ic_launcher_background">#0B0A12</color>
+
+    <!-- Alias historiques -->
+    <color name="neon">@color/accent</color>
+    <color name="neon_strong">@color/accent_strong</color>
+    <color name="magenta">@color/accent</color>
+    <color name="cyan">@color/accent_soft</color>
+
+    <color name="ic_launcher_background">#07090D</color>
 </resources>

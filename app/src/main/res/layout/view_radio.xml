@@ -1,0 +1,115 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Écran Radio (onglet Kali › Radio) : capteur WIDS wol-pi + ESP32, via le
+     webhook n8n (RadioClient). Remplace la boîte de dialogue de RadioPanel.
+     Même gabarit que les autres écrans : carte focus, tuiles, console. -->
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent" android:layout_height="match_parent" android:scrollbars="none">
+    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical"
+        android:paddingBottom="12dp">
+
+        <!-- Carte capteur -->
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical"
+            android:background="@drawable/hero" android:padding="16dp">
+            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal"
+                android:gravity="center_vertical">
+                <LinearLayout android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content" android:orientation="vertical">
+                    <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="CAPTEUR"
+                        android:textColor="@color/muted" android:textSize="11sp" android:fontFamily="monospace" android:letterSpacing="0.12" />
+                    <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="wol-pi · agent 034"
+                        android:textColor="@color/text" android:textStyle="bold" android:textSize="15sp" />
+                    <TextView android:id="@+id/radLast" android:layout_width="wrap_content" android:layout_height="wrap_content"
+                        android:text="statut inconnu" android:textColor="@color/muted" android:textSize="11sp" android:fontFamily="monospace" />
+                </LinearLayout>
+                <TextView android:id="@+id/radChip" android:layout_width="wrap_content" android:layout_height="wrap_content"
+                    android:background="@drawable/chip_root" android:text="…" android:textColor="@color/accent_soft"
+                    android:textSize="11sp" android:fontFamily="monospace" />
+            </LinearLayout>
+
+            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal"
+                android:layout_marginTop="12dp">
+                <LinearLayout android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content"
+                    android:orientation="vertical" android:background="@drawable/tile" android:padding="10dp" android:layout_marginEnd="6dp">
+                    <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Kismet" android:textColor="@color/muted" android:textSize="11sp" />
+                    <TextView android:id="@+id/radKismet" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="—"
+                        android:textColor="@color/text" android:textSize="12sp" android:fontFamily="monospace" />
+                </LinearLayout>
+                <LinearLayout android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content"
+                    android:orientation="vertical" android:background="@drawable/tile" android:padding="10dp" android:layout_marginEnd="6dp">
+                    <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Uplink" android:textColor="@color/muted" android:textSize="11sp" />
+                    <TextView android:id="@+id/radUplink" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="—"
+                        android:textColor="@color/text" android:textSize="12sp" android:fontFamily="monospace" />
+                </LinearLayout>
+                <LinearLayout android:id="@+id/radInjectBox" android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content"
+                    android:orientation="vertical" android:background="@drawable/tile" android:padding="10dp">
+                    <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Injection" android:textColor="@color/muted" android:textSize="11sp" />
+                    <TextView android:id="@+id/radInject" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="—"
+                        android:textColor="@color/text" android:textSize="12sp" android:fontFamily="monospace" />
+                </LinearLayout>
+            </LinearLayout>
+        </LinearLayout>
+
+        <!-- Capteur · Blue -->
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal"
+            android:gravity="bottom" android:layout_marginTop="16dp" android:layout_marginBottom="8dp">
+            <TextView android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content" android:text="Capteur · Blue"
+                android:textColor="@color/text" android:textStyle="bold" android:textSize="15sp" />
+            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="détection"
+                android:textColor="@color/info" android:textSize="11sp" android:fontFamily="monospace" />
+        </LinearLayout>
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal">
+            <TextView android:id="@+id/radStatus" style="@style/PurpleOps.TileButton" android:layout_marginEnd="8dp" android:text="Statut" />
+            <TextView android:id="@+id/radSniff" style="@style/PurpleOps.TileButton" android:text="Sniff · 30 s" />
+        </LinearLayout>
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal" android:layout_marginTop="8dp">
+            <TextView android:id="@+id/radKismetOn" style="@style/PurpleOps.TileButton" android:layout_marginEnd="8dp" android:text="Kismet ON" />
+            <TextView android:id="@+id/radKismetOff" style="@style/PurpleOps.TileButton" android:text="Kismet OFF…" />
+        </LinearLayout>
+
+        <!-- ESP32 · Red -->
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal"
+            android:gravity="bottom" android:layout_marginTop="16dp" android:layout_marginBottom="8dp">
+            <TextView android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content" android:text="ESP32 · émetteur Red"
+                android:textColor="@color/text" android:textStyle="bold" android:textSize="15sp" />
+            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="série via le Pi"
+                android:textColor="@color/muted" android:textSize="11sp" android:fontFamily="monospace" />
+        </LinearLayout>
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal">
+            <TextView android:id="@+id/radEspScan" style="@style/PurpleOps.TileButton" android:layout_marginEnd="8dp" android:text="Scan ESP" />
+            <TextView android:id="@+id/radEspStatus" style="@style/PurpleOps.TileButton" android:text="Statut ESP" />
+        </LinearLayout>
+
+        <!-- Actions offensives : verrouillées sans carte d'injection -->
+        <LinearLayout android:id="@+id/radOffBox" android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:orientation="vertical" android:background="@drawable/card_locked" android:padding="14dp" android:layout_marginTop="16dp">
+            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal" android:gravity="center_vertical">
+                <ImageView android:id="@+id/radOffIcon" android:layout_width="18dp" android:layout_height="18dp" android:src="@drawable/ic_lock"
+                    android:layout_marginEnd="10dp" android:importantForAccessibility="no" app:tint="@color/danger_soft" />
+                <TextView android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content" android:text="Actions offensives"
+                    android:textColor="@color/text" android:textStyle="bold" android:textSize="15sp" />
+                <TextView android:id="@+id/radOffState" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="VERROUILLÉ"
+                    android:textColor="@color/danger_soft" android:textSize="11sp" android:fontFamily="monospace" />
+            </LinearLayout>
+            <TextView android:id="@+id/radOffHint" android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:layout_marginTop="8dp" android:lineSpacingExtra="2dp"
+                android:text="Branche la carte AR9271 pour débloquer. Liste blanche de BSSID sur le Pi, chaque trame auditée dans Wazuh."
+                android:textColor="@color/text_soft" android:textSize="12sp" />
+            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal" android:layout_marginTop="10dp">
+                <TextView android:id="@+id/radCapture" style="@style/PurpleOps.TileButton" android:layout_marginEnd="8dp" android:minHeight="48dp" android:text="Capture handshake…" />
+                <TextView android:id="@+id/radDeauth" style="@style/PurpleOps.TileButton" android:minHeight="48dp" android:text="Deauth-test (5)…" />
+            </LinearLayout>
+        </LinearLayout>
+
+        <!-- Journal -->
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical"
+            android:background="@drawable/bg_console" android:layout_marginTop="16dp">
+            <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="JOURNAL · WEBHOOK N8N"
+                android:textColor="@color/muted" android:textSize="11sp" android:fontFamily="monospace" android:letterSpacing="0.12"
+                android:paddingStart="12dp" android:paddingTop="8dp" android:paddingEnd="12dp" android:paddingBottom="6dp" />
+            <TextView android:id="@+id/radLog" android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:minHeight="96dp" android:padding="12dp" android:textIsSelectable="true"
+                android:text="Touche « Statut » pour l'état du capteur." android:textColor="@color/console_text"
+                android:textSize="12sp" android:fontFamily="monospace" />
+        </LinearLayout>
+    </LinearLayout>
+</ScrollView>

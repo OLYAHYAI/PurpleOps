@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Feuille de confirmation unique (ConfirmSheet) : remplace les AlertDialog
+     pour les actions sensibles. Champs optionnels ajoutés dans sheetFields. -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:id="@+id/sheetRoot"
+    android:layout_width="match_parent" android:layout_height="wrap_content"
+    android:orientation="vertical" android:background="@drawable/bg_sheet"
+    android:paddingStart="16dp" android:paddingEnd="16dp" android:paddingTop="12dp" android:paddingBottom="20dp">
+
+    <View android:layout_width="40dp" android:layout_height="4dp" android:layout_gravity="center_horizontal"
+        android:background="@drawable/sheet_handle" android:layout_marginBottom="16dp" />
+
+    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal"
+        android:gravity="center_vertical">
+        <ImageView android:id="@+id/sheetIcon" android:layout_width="44dp" android:layout_height="44dp" android:padding="11dp"
+            android:background="@drawable/chip_danger" android:src="@drawable/ic_alert_tri" app:tint="@color/danger_soft"
+            android:layout_marginEnd="12dp" android:importantForAccessibility="no" />
+        <LinearLayout android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content" android:orientation="vertical">
+            <TextView android:id="@+id/sheetKicker" android:layout_width="wrap_content" android:layout_height="wrap_content"
+                android:textColor="@color/danger_soft" android:textSize="11sp" android:fontFamily="monospace" android:letterSpacing="0.12" />
+            <TextView android:id="@+id/sheetTitle" android:layout_width="wrap_content" android:layout_height="wrap_content"
+                android:textColor="@color/text" android:textStyle="bold" android:textSize="19sp" android:accessibilityHeading="true" />
+        </LinearLayout>
+    </LinearLayout>
+
+    <TextView android:id="@+id/sheetMessage" android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:layout_marginTop="12dp" android:textColor="@color/text_soft" android:textSize="13sp" android:lineSpacingExtra="2dp"
+        android:visibility="gone" />
+
+    <LinearLayout android:id="@+id/sheetFields" android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:orientation="vertical" />
+
+    <TextView android:id="@+id/sheetWarn" android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:layout_marginTop="12dp" android:background="@drawable/card_warn" android:padding="12dp"
+        android:textColor="@color/warn_soft" android:textSize="12sp" android:lineSpacingExtra="2dp" android:visibility="gone" />
+
+    <TextView android:id="@+id/sheetConfirm" style="@style/PurpleOps.SheetButton" android:layout_marginTop="16dp"
+        android:minHeight="56dp" android:background="@drawable/btn_danger" android:textColor="#FFFFFF" />
+    <TextView android:id="@+id/sheetCancel" style="@style/PurpleOps.SheetButton" android:layout_marginTop="10dp"
+        android:minHeight="48dp" android:background="@drawable/btn_ghost" android:text="Annuler" android:textColor="@color/text" />
+</LinearLayout>

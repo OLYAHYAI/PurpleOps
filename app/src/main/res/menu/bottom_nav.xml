@@ -6,5 +6,5 @@
     <item android:id="@+id/nav_screen" android:icon="@drawable/ic_screen" android:title="Écran" />
     <item android:id="@+id/nav_chat" android:icon="@drawable/ic_chat" android:title="Chat" />
     <item android:id="@+id/nav_kali" android:icon="@drawable/ic_kali" android:title="Kali" />
-    <item android:id="@+id/nav_settings" android:icon="@drawable/ic_settings" android:title="Reglages" />
+    <item android:id="@+id/nav_settings" android:icon="@drawable/ic_settings" android:title="Réglages" />
 </menu>

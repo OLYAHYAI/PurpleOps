@@ -31,14 +31,22 @@
             android:layout_width="match_parent" android:layout_height="match_parent" />
     </FrameLayout>
 
+    <!-- Barre flottante « Neon Ops » : pastille arrondie, indicateur actif violet.
+         La marge basse suit les insets système (MainActivity). -->
     <com.google.android.material.bottomnavigation.BottomNavigationView
         android:id="@+id/bottomNav"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:background="@color/surface"
+        android:layout_marginStart="12dp"
+        android:layout_marginEnd="12dp"
+        android:layout_marginBottom="10dp"
+        android:background="@drawable/bg_nav"
+        app:backgroundTint="@null"
         app:elevation="0dp"
         app:menu="@menu/bottom_nav"
         app:itemIconTint="@color/nav_item"
         app:itemTextColor="@color/nav_item"
+        app:itemActiveIndicatorStyle="@style/Widget.PurpleOps.NavIndicator"
+        app:paddingBottomSystemWindowInsets="false"
         app:labelVisibilityMode="labeled" />
 </LinearLayout>

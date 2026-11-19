@@ -1,11 +1,42 @@
 <resources xmlns:tools="http://schemas.android.com/tools">
     <style name="Theme.PurpleOps" parent="Theme.Material3.Dark.NoActionBar">
-        <item name="colorPrimary">@color/neon_strong</item>
-        <item name="colorOnPrimary">#0B0A12</item>
-        <item name="colorPrimaryContainer">@color/surface2</item>
+        <item name="colorPrimary">@color/accent</item>
+        <item name="colorOnPrimary">#0A0E13</item>
+        <item name="colorPrimaryContainer">@color/surface_focus</item>
+        <item name="colorOnPrimaryContainer">@color/accent_on</item>
+        <item name="colorSecondary">@color/accent_soft</item>
+        <item name="colorError">@color/danger</item>
+        <item name="colorOutline">@color/border_strong</item>
+        <item name="colorOutlineVariant">@color/border</item>
+        <!-- Surfaces : dialogues, feuilles du bas et menus prennent la palette
+             (M3 1.12 lit les colorSurfaceContainer*). -->
+        <item name="colorSurface">@color/surface</item>
+        <item name="colorOnSurface">@color/text</item>
+        <item name="colorOnSurfaceVariant">@color/muted</item>
+        <item name="colorSurfaceContainerLowest">@color/bg</item>
+        <item name="colorSurfaceContainerLow">#0E131A</item>
+        <item name="colorSurfaceContainer">@color/surface</item>
+        <item name="colorSurfaceContainerHigh">#161D26</item>
+        <item name="colorSurfaceContainerHighest">@color/surface2</item>
         <item name="android:colorBackground">@color/bg</item>
         <item name="android:statusBarColor">@color/bg</item>
         <item name="android:navigationBarColor">@color/bg</item>
         <item name="android:windowLightStatusBar">false</item>
+        <item name="bottomSheetDialogTheme">@style/ThemeOverlay.PurpleOps.Sheet</item>
+    </style>
+
+    <!-- Feuille de confirmation : fond transparent, la forme vient de bg_sheet. -->
+    <style name="ThemeOverlay.PurpleOps.Sheet" parent="ThemeOverlay.Material3.BottomSheetDialog">
+        <item name="bottomSheetStyle">@style/Widget.PurpleOps.Sheet</item>
+        <item name="android:windowSoftInputMode">adjustResize</item>
+        <item name="android:navigationBarColor">#0B0D12</item>
+    </style>
+    <style name="Widget.PurpleOps.Sheet" parent="Widget.Material3.BottomSheet.Modal">
+        <item name="backgroundTint">@android:color/transparent</item>
+    </style>
+
+    <!-- Barre du bas : pastille active violette. -->
+    <style name="Widget.PurpleOps.NavIndicator" parent="Widget.Material3.BottomNavigationView.ActiveIndicator">
+        <item name="android:color">#38A37BFF</item>
     </style>
 </resources>

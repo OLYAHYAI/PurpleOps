@@ -1,150 +1,152 @@
 package com.jbr.purpleops
 
 import android.content.Context
-import android.graphics.Color
-import android.graphics.Typeface
-import android.text.InputType
-import android.view.Gravity
 import android.view.View
-import android.view.ViewGroup
-import android.widget.EditText
+import android.widget.ImageView
 import android.widget.LinearLayout
-import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
-import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.content.ContextCompat
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 /**
- * Écran radio (wol-pi) : connect / sniff / attaque depuis un bouton.
+ * Écran Radio (onglet Kali › Radio) : capteur WIDS wol-pi + ESP32.
+ *
+ * Refonte « Neon Ops » (19/11) : ce n'est plus une boîte de dialogue mais un
+ * écran du même gabarit que Kali (layout `view_radio.xml`). L'URL du webhook
+ * se règle dans Réglages. Les actions sensibles passent par [ConfirmSheet].
  *
  * Appelle le webhook n8n ([RadioClient]). Les actions offensives
- * (capture-handshake, deauth-test) restent grisées tant que le dernier
+ * (capture-handshake, deauth-test) restent verrouillées tant que le dernier
  * « Statut » rapporte `inject=none` (pas de carte AR9271) ; de toute façon le
- * Pi applique l'allowlist de BSSID et audite dans Wazuh. Périmètre : TON réseau.
+ * Pi applique l'allowlist de BSSID et audite dans Wazuh (100733-100738).
+ * Périmètre : TON réseau. Deauth ciblé par défaut (incident du 18/11).
  */
-class RadioPanel(private val act: AppCompatActivity, private val ui: CoroutineScope) {
+class RadioPanel(private val act: AppCompatActivity, root: View, private val ui: CoroutineScope) {
 
     private val ctx: Context get() = act.applicationContext
     private var injectAvailable = false
-    private lateinit var log: TextView
-    private lateinit var captureBtn: TextView
-    private lateinit var deauthBtn: TextView
+    private var statusLoaded = false
+    private val hhmm = SimpleDateFormat("HH:mm", Locale.FRANCE)
 
-    private fun dp(v: Int) = (v * act.resources.displayMetrics.density).toInt()
+    private val log: TextView = root.findViewById(R.id.radLog)
+    private val chip: TextView = root.findViewById(R.id.radChip)
+    private val last: TextView = root.findViewById(R.id.radLast)
+    private val kismet: TextView = root.findViewById(R.id.radKismet)
+    private val uplink: TextView = root.findViewById(R.id.radUplink)
+    private val inject: TextView = root.findViewById(R.id.radInject)
+    private val injectBox: LinearLayout = root.findViewById(R.id.radInjectBox)
+    private val offBox: LinearLayout = root.findViewById(R.id.radOffBox)
+    private val offIcon: ImageView = root.findViewById(R.id.radOffIcon)
+    private val offState: TextView = root.findViewById(R.id.radOffState)
+    private val offHint: TextView = root.findViewById(R.id.radOffHint)
+    private val captureBtn: TextView = root.findViewById(R.id.radCapture)
+    private val deauthBtn: TextView = root.findViewById(R.id.radDeauth)
 
-    fun open() {
-        val root = LinearLayout(act).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(18), dp(8), dp(18), 0) }
-
-        val urlInput = EditText(act).apply {
-            setText(RadioClient.url(ctx)); setSingleLine(); textSize = 12f
-            setTextColor(Color.parseColor("#EDE9F5")); setHintTextColor(Color.parseColor("#8A7FA5"))
-            inputType = InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS or InputType.TYPE_TEXT_VARIATION_URI
+    init {
+        root.findViewById<View>(R.id.radStatus).setOnClickListener { run("status", "") }
+        root.findViewById<View>(R.id.radSniff).setOnClickListener { run("sniff", "30") }
+        root.findViewById<View>(R.id.radKismetOn).setOnClickListener { run("kismet-start", "") }
+        root.findViewById<View>(R.id.radKismetOff).setOnClickListener {
+            ConfirmSheet(act, "Arrêter Kismet ?", "Arrêter Kismet")
+                .kicker("WIDS AVEUGLÉ · AUDITÉ")
+                .message("Le capteur ne détectera plus rien pendant l'arrêt. L'action est tracée dans Wazuh (règle 100733).")
+                .show { run("kismet-stop", "") }
         }
-        root.addView(label("Webhook n8n")); root.addView(urlInput)
+        root.findViewById<View>(R.id.radEspScan).setOnClickListener { run("esp-scan", "") }
+        root.findViewById<View>(R.id.radEspStatus).setOnClickListener { run("esp-status", "") }
+        captureBtn.setOnClickListener { captureSheet() }
+        deauthBtn.setOnClickListener { deauthSheet() }
+        applyLock()
+    }
 
-        val grid = LinearLayout(act).apply { orientation = LinearLayout.VERTICAL; setPadding(0, dp(10), 0, 0) }
-        grid.addView(btn("Statut") { run("status", "") })
-        grid.addView(btn("Sniff 30 s") { run("sniff", "30") })
-        grid.addView(btn("Kismet ON") { run("kismet-start", "") })
-        grid.addView(btn("Kismet OFF") { confirm("Arrêter Kismet ?", "Le WIDS ne détectera plus pendant l'arrêt. Action auditée.") { run("kismet-stop", "") } })
-        grid.addView(label("— ESP32 (émetteur Red, série via le Pi) —"))
-        grid.addView(btn("Scan ESP") { run("esp-scan", "") })
-        grid.addView(btn("Statut ESP") { run("esp-status", "") })
-        captureBtn = btn("Capture handshake…") { captureDialog() }
-        deauthBtn = btn("Deauth-test (5 trames)…") { deauthDialog() }
-        grid.addView(captureBtn); grid.addView(deauthBtn)
-        root.addView(grid)
-
-        log = TextView(act).apply {
-            text = "Touche « Statut » pour l'état du capteur."
-            setTextColor(Color.parseColor("#8A7FA5")); textSize = 12f; typeface = Typeface.MONOSPACE
-            setPadding(0, dp(10), 0, dp(4))
-        }
-        root.addView(log)
-
-        applyGrey()
-
-        val scroller = ScrollView(act).apply { addView(root) }
-        AlertDialog.Builder(act).setTitle("Radio — wol-pi").setView(scroller)
-            .setPositiveButton("Fermer", null)
-            .setNeutralButton("Enregistrer l'URL") { _, _ -> RadioClient.setUrl(ctx, urlInput.text.toString()); toast("URL enregistrée") }
-            .show()
-
-        run("status", "") // état à l'ouverture (pilote le grisage)
+    /** Appelé à chaque affichage de l'écran : premier « Statut » automatique (pilote le verrou). */
+    fun onShown() {
+        if (!statusLoaded) { statusLoaded = true; run("status", "") }
     }
 
     private fun run(action: String, args: String) {
         append("→ $action${if (args.isNotEmpty()) " $args" else ""}…")
         ui.launch {
             val r = RadioClient.call(ctx, action, args)
-            if (action == "status") { injectAvailable = (r.fields["inject"] ?: "none") != "none"; applyGrey() }
+            if (action == "status") applyStatus(r)
             val head = if (r.ok) "✓" else "✗"
             val detail = r.error ?: r.raw.replace("\n", " · ")
             append("$head $action : $detail")
         }
     }
 
-    private fun captureDialog() {
-        if (!injectAvailable) { toast("Pas de carte d'injection — branche l'AR9271"); return }
-        val bssid = field("BSSID cible (ex 70:3A:D8:4C:09:E0)")
-        val ch = field("Canal (ex 1)").apply { inputType = InputType.TYPE_CLASS_NUMBER }
-        val box = LinearLayout(act).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(18), dp(8), dp(18), 0) }
-        box.addView(label("BSSID AP")); box.addView(bssid); box.addView(label("Canal")); box.addView(ch)
-        AlertDialog.Builder(act).setTitle("Capture handshake").setView(box)
-            .setPositiveButton("Lancer") { _, _ ->
-                run("capture-handshake", "${bssid.text.toString().trim()} ${ch.text.toString().trim()}")
-            }
-            .setNegativeButton("Annuler", null).show()
+    private fun applyStatus(r: RadioClient.Result) {
+        last.text = "dernier statut ${hhmm.format(Date())}"
+        if (!r.ok) {
+            setChip("INJOIGNABLE", R.drawable.chip_danger, R.color.danger_soft)
+            return
+        }
+        val f = r.fields
+        val inj = f["inject"] ?: "none"
+        injectAvailable = inj != "none"
+        val k = f["kismet"] ?: f["kismet_state"]
+        kismet.text = k ?: "—"
+        uplink.text = f["uplink"] ?: f["wlan0"] ?: "—"
+        inject.text = if (injectAvailable) inj else "aucune"
+        inject.setTextColor(color(if (injectAvailable) R.color.ok_soft else R.color.warn_soft))
+        injectBox.setBackgroundResource(if (injectAvailable) R.drawable.tile else R.drawable.card_warn)
+        val kOn = k != null && k.lowercase(Locale.ROOT).let { it.contains("up") || it.contains("on") || it.contains("active") || it.contains("run") }
+        if (k == null) setChip("EN LIGNE", R.drawable.chip_ok, R.color.ok_soft)
+        else if (kOn) setChip("KISMET ON", R.drawable.chip_ok, R.color.ok_soft)
+        else setChip("KISMET OFF", R.drawable.chip_warn, R.color.warn_soft)
+        applyLock()
     }
 
-    private fun deauthDialog() {
-        if (!injectAvailable) { toast("Pas de carte d'injection — branche l'AR9271"); return }
-        val bssid = field("BSSID AP (ex 70:3A:D8:4C:09:E0)")
-        val client = field("Client MAC (vide = broadcast)")
-        val ch = field("Canal (ex 1)").apply { inputType = InputType.TYPE_CLASS_NUMBER }
-        val box = LinearLayout(act).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(18), dp(8), dp(18), 0) }
-        box.addView(label("BSSID AP")); box.addView(bssid); box.addView(label("Client")); box.addView(client); box.addView(label("Canal")); box.addView(ch)
-        AlertDialog.Builder(act).setTitle("Deauth-test (TON réseau)").setView(box)
-            .setPositiveButton("Lancer") { _, _ ->
-                val c = client.text.toString().trim().ifBlank { "ff:ff:ff:ff:ff:ff" }
-                run("deauth-test", "${bssid.text.toString().trim()} $c ${ch.text.toString().trim()}")
-            }
-            .setNegativeButton("Annuler", null).show()
+    private fun setChip(text: String, bg: Int, fg: Int) {
+        chip.text = text; chip.setBackgroundResource(bg); chip.setTextColor(color(fg))
     }
 
-    private fun applyGrey() {
-        for (b in listOf(captureBtn, deauthBtn)) {
-            b.isEnabled = injectAvailable
-            b.alpha = if (injectAvailable) 1f else 0.4f
+    private fun applyLock() {
+        for (b in listOf(captureBtn, deauthBtn)) b.isEnabled = injectAvailable
+        if (injectAvailable) {
+            offBox.setBackgroundResource(R.drawable.card)
+            offState.text = "PRÊT"; offState.setTextColor(color(R.color.warn_soft))
+            offIcon.setImageResource(R.drawable.ic_alert_tri)
+            offHint.text = "Carte d'injection présente. Liste blanche de BSSID sur le Pi, chaque trame auditée dans Wazuh."
+        } else {
+            offBox.setBackgroundResource(R.drawable.card_locked)
+            offState.text = "VERROUILLÉ"; offState.setTextColor(color(R.color.danger_soft))
+            offIcon.setImageResource(R.drawable.ic_lock)
+            offHint.text = "Branche la carte AR9271 pour débloquer. Liste blanche de BSSID sur le Pi, chaque trame auditée dans Wazuh."
         }
     }
 
-    // --- helpers UI ---
-    private fun label(t: String) = TextView(act).apply {
-        text = t; setTextColor(Color.parseColor("#8A7FA5")); textSize = 12f; setPadding(0, dp(6), 0, dp(2))
+    private fun captureSheet() {
+        if (!injectAvailable) { toast("Pas de carte d'injection — branche l'AR9271"); return }
+        ConfirmSheet(act, "Capture handshake", "Lancer la capture")
+            .kicker("ACTION OFFENSIVE · AUDITÉE")
+            .field("bssid", "BSSID de l'AP (liste blanche)", "70:3A:D8:4C:09:E0")
+            .field("ch", "Canal", "1", numeric = true)
+            .show { v -> run("capture-handshake", "${v["bssid"]} ${v["ch"]}") }
     }
 
-    private fun field(hint: String) = EditText(act).apply {
-        this.hint = hint; setSingleLine(); setTextColor(Color.parseColor("#EDE9F5")); setHintTextColor(Color.parseColor("#8A7FA5"))
-        inputType = InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
+    private fun deauthSheet() {
+        if (!injectAvailable) { toast("Pas de carte d'injection — branche l'AR9271"); return }
+        ConfirmSheet(act, "Deauth-test · 5 trames", "Lancer les 5 trames")
+            .kicker("ACTION OFFENSIVE · AUDITÉE")
+            .field("bssid", "BSSID de l'AP (liste blanche)", "70:3A:D8:4C:09:E0")
+            .field("client", "MAC du client ciblé", "aa:bb:cc:dd:ee:ff")
+            .field("ch", "Canal", "1", numeric = true)
+            .warn("Deauth ciblé par défaut. Un broadcast (ff:ff:ff:ff:ff:ff, à saisir explicitement) éjecte aussi le capteur et les autres clients du canal (incident du 18/11).")
+            .show { v ->
+                val client = v["client"].orEmpty()
+                if (client.isBlank()) { toast("Indique la MAC du client (ou ff:ff:ff:ff:ff:ff pour un broadcast)"); return@show }
+                run("deauth-test", "${v["bssid"]} $client ${v["ch"]}")
+            }
     }
 
-    private fun btn(text: String, onClick: () -> Unit): TextView = TextView(act).apply {
-        this.text = text; setTextColor(Color.parseColor("#EDE9F5")); textSize = 15f
-        setBackgroundResource(R.drawable.btn_neon); gravity = Gravity.CENTER
-        setPadding(dp(14), dp(12), dp(14), dp(12)); isClickable = true
-        layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { bottomMargin = dp(8) }
-        setOnClickListener { onClick() }
-    }
-
-    private fun confirm(title: String, msg: String, onYes: () -> Unit) {
-        AlertDialog.Builder(act).setTitle(title).setMessage(msg)
-            .setPositiveButton("Oui") { _, _ -> onYes() }.setNegativeButton("Non", null).show()
-    }
-
+    private fun color(id: Int) = ContextCompat.getColor(act, id)
     private fun append(s: String) { log.text = (log.text.toString() + "\n" + s).takeLast(4000) }
     private fun toast(s: String) = Toast.makeText(act, s, Toast.LENGTH_SHORT).show()
 }
