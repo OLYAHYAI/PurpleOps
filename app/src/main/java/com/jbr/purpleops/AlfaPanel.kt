@@ -413,6 +413,9 @@ class AlfaPanel(private val act: AppCompatActivity, root: View, private val ui: 
                     chroot("iw dev wlan1 set type monitor && ip link set wlan1 up")
                 }
             }
+            // Laisse le netdev wlan1mon s'enregistrer avant de relire le statut
+            // (sinon le libellé du bouton retarde d'un cycle).
+            kotlinx.coroutines.delay(600)
             busy = false; refresh()
         }
     }
@@ -436,7 +439,9 @@ class AlfaPanel(private val act: AppCompatActivity, root: View, private val ui: 
         ui.launch {
             appendConsole(""); appendConsole("→ scan $secs s…")
             soc("airodump-ng wlan1mon (${secs}s)")
-            chroot("rm -f /tmp/alfa-scan-*; timeout $secs airodump-ng wlan1mon -w /tmp/alfa-scan --output-format csv --write-interval 1 >/dev/null 2>&1; echo SCAN_DONE")
+            // airodump-ng ne s'arrête proprement que sur SIGINT : timeout -s INT
+            // (SIGTERM le laisse tourner → action bloquée). -k 3 = SIGKILL de secours.
+            chroot("rm -f /tmp/alfa-scan-*; timeout -s INT -k 3 $secs airodump-ng wlan1mon -w /tmp/alfa-scan --output-format csv --write-interval 1 >/dev/null 2>&1; echo SCAN_DONE")
             val csv = RootRunner.readFileAsRoot("/data/local/kali/tmp/alfa-scan-01.csv")
             renderScan(csv)
             busy = false; refresh()
@@ -585,7 +590,7 @@ class AlfaPanel(private val act: AppCompatActivity, root: View, private val ui: 
             if (!mon.contains("wlan1mon") && !mon.contains("monitor mode"))
                 chroot("iw dev wlan1 set type monitor && ip link set wlan1 up")
             appendConsole("[3/3] Scan 10 s…")
-            chroot("rm -f /tmp/alfa-scan-*; timeout 10 airodump-ng wlan1mon -w /tmp/alfa-scan --output-format csv >/dev/null 2>&1; echo SCAN_DONE")
+            chroot("rm -f /tmp/alfa-scan-*; timeout -s INT -k 3 10 airodump-ng wlan1mon -w /tmp/alfa-scan --output-format csv >/dev/null 2>&1; echo SCAN_DONE")
             renderScan(RootRunner.readFileAsRoot("/data/local/kali/tmp/alfa-scan-01.csv"))
             appendConsole("=== FIN MACRO ===")
             busy = false; refresh()
