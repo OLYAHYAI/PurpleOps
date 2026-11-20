@@ -19,7 +19,8 @@
             android:textSize="11sp" android:fontFamily="@font/jetbrains_mono" />
     </LinearLayout>
 
-    <!-- Sélecteur Outils | Radio (remplace l'ancien bouton « 📡 Radio » et sa boîte de dialogue). -->
+    <!-- Sélecteur Outils | Radio | Alfa. Radio = capteur WIDS distant (wol-pi) ;
+         Alfa = carte Wi-Fi USB locale du téléphone (RT3070 en OTG). -->
     <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
         android:orientation="horizontal" android:background="@drawable/bg_segment" android:layout_marginBottom="12dp">
         <TextView android:id="@+id/segTools" android:layout_width="0dp" android:layout_weight="1" android:layout_height="40dp"
@@ -28,9 +29,15 @@
         <TextView android:id="@+id/segRadio" android:layout_width="0dp" android:layout_weight="1" android:layout_height="40dp"
             android:gravity="center" android:background="@drawable/seg_item" android:text="Radio"
             android:textColor="@color/seg_text" android:textStyle="bold" android:textSize="13sp" android:clickable="true" android:focusable="true" />
+        <TextView android:id="@+id/segAlfa" android:layout_width="0dp" android:layout_weight="1" android:layout_height="40dp"
+            android:gravity="center" android:background="@drawable/seg_item" android:text="Alfa"
+            android:textColor="@color/seg_text" android:textStyle="bold" android:textSize="13sp" android:clickable="true" android:focusable="true" />
     </LinearLayout>
 
     <include android:id="@+id/radioView" layout="@layout/view_radio"
+        android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1" android:visibility="gone" />
+
+    <include android:id="@+id/alfaView" layout="@layout/view_alfa"
         android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1" android:visibility="gone" />
 
     <LinearLayout android:id="@+id/kaliTools" android:layout_width="match_parent" android:layout_height="0dp"

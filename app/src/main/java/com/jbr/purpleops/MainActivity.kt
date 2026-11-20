@@ -45,6 +45,7 @@ class MainActivity : AppCompatActivity() {
     private var screen: ScreenPanel? = null
     private var home: HomePanel? = null
     private var radio: RadioPanel? = null
+    private var alfa: AlfaPanel? = null
     private lateinit var bottomNav: BottomNavigationView
     private var currentTab = R.id.nav_home
 
@@ -199,9 +200,12 @@ class MainActivity : AppCompatActivity() {
         // Kali › Radio (wol-pi) : écran du capteur WIDS via le webhook n8n,
         // derrière le sélecteur Outils | Radio (plus de boîte de dialogue).
         radio = try { RadioPanel(this, findViewById(R.id.radioView), ui) } catch (e: Exception) { null }
-        findViewById<View>(R.id.segTools).setOnClickListener { showOps(radio = false) }
-        findViewById<View>(R.id.segRadio).setOnClickListener { showOps(radio = true) }
-        showOps(radio = false)
+        // Kali › Alfa : carte Wi-Fi USB locale (RT3070 en OTG), distincte du capteur Radio.
+        alfa = try { AlfaPanel(this, findViewById(R.id.alfaView), ui) } catch (e: Exception) { null }
+        findViewById<View>(R.id.segTools).setOnClickListener { showOps(Seg.TOOLS) }
+        findViewById<View>(R.id.segRadio).setOnClickListener { showOps(Seg.RADIO) }
+        findViewById<View>(R.id.segAlfa).setOnClickListener { showOps(Seg.ALFA) }
+        showOps(Seg.TOOLS)
 
         targetInput.setText(getSharedPreferences("purpleops", MODE_PRIVATE).getString("target", ""))
         runButton.setOnClickListener { runFree() }
@@ -216,16 +220,26 @@ class MainActivity : AppCompatActivity() {
         loadCatalog()
     }
 
-    /** Sous-onglet de Kali : Outils (catalogue + console) ou Radio. */
-    private fun showOps(radio: Boolean) {
-        findViewById<View>(R.id.segTools).isSelected = !radio
-        findViewById<View>(R.id.segRadio).isSelected = radio
-        findViewById<View>(R.id.kaliTools).visibility = if (radio) View.GONE else View.VISIBLE
-        findViewById<View>(R.id.radioView).visibility = if (radio) View.VISIBLE else View.GONE
-        findViewById<TextView>(R.id.opsKicker).text = if (radio) "OPÉRATIONS · WIDS WOL-PI" else "OPÉRATIONS · CHROOT KALI"
-        findViewById<TextView>(R.id.opsTitle).text = if (radio) "Radio" else "Kali"
-        findViewById<View>(R.id.rootChip).visibility = if (radio) View.GONE else View.VISIBLE
-        if (radio) this.radio?.onShown()
+    /** Sous-onglet de Kali : Outils (catalogue), Radio (capteur WIDS) ou Alfa (carte locale). */
+    private enum class Seg { TOOLS, RADIO, ALFA }
+    private fun showOps(seg: Seg) {
+        findViewById<View>(R.id.segTools).isSelected = seg == Seg.TOOLS
+        findViewById<View>(R.id.segRadio).isSelected = seg == Seg.RADIO
+        findViewById<View>(R.id.segAlfa).isSelected = seg == Seg.ALFA
+        findViewById<View>(R.id.kaliTools).visibility = if (seg == Seg.TOOLS) View.VISIBLE else View.GONE
+        findViewById<View>(R.id.radioView).visibility = if (seg == Seg.RADIO) View.VISIBLE else View.GONE
+        findViewById<View>(R.id.alfaView).visibility = if (seg == Seg.ALFA) View.VISIBLE else View.GONE
+        val (kick, title) = when (seg) {
+            Seg.TOOLS -> "OPÉRATIONS · CHROOT KALI" to "Kali"
+            Seg.RADIO -> "OPÉRATIONS · WIDS WOL-PI" to "Radio"
+            Seg.ALFA -> "OPÉRATIONS · ALFA RT3070" to "Alfa"
+        }
+        findViewById<TextView>(R.id.opsKicker).text = kick
+        findViewById<TextView>(R.id.opsTitle).text = title
+        // Root pertinent côté Outils (chroot) et Alfa (noyau/sysfs), pas pour le capteur distant.
+        findViewById<View>(R.id.rootChip).visibility = if (seg == Seg.RADIO) View.GONE else View.VISIBLE
+        if (seg == Seg.RADIO) radio?.onShown()
+        if (seg == Seg.ALFA) alfa?.onShown()
     }
 
     private fun checkRoot() {
