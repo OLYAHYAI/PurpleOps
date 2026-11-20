@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Kali › Alfa : pilotage de la carte Wi-Fi USB locale (Alfa AWUS036NH / RT3070)
+  branchée en OTG sur le téléphone. Tout le contenu (statut, bascule Armer,
+  tuiles d'actions) est construit en code par AlfaPanel via le kit Neon, comme
+  l'Accueil ; ce layout n'en pose que le squelette : zone déroulante + console.
+-->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical">
+
+    <ScrollView android:id="@+id/alfaScroll" android:layout_width="match_parent"
+        android:layout_height="0dp" android:layout_weight="1.35" android:scrollbars="none">
+        <LinearLayout android:id="@+id/alfaContent" android:layout_width="match_parent"
+            android:layout_height="wrap_content" android:orientation="vertical" />
+    </ScrollView>
+
+    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:orientation="horizontal" android:gravity="center_vertical" android:paddingTop="6dp">
+        <TextView android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content"
+            android:text="CONSOLE ALFA" android:textColor="@color/muted" android:textSize="11sp"
+            android:letterSpacing="0.12" android:fontFamily="@font/jetbrains_mono" />
+        <TextView android:id="@+id/alfaClear" android:layout_width="wrap_content" android:layout_height="wrap_content"
+            android:background="@drawable/btn_neon" android:paddingStart="16dp" android:paddingEnd="16dp"
+            android:paddingTop="8dp" android:paddingBottom="8dp" android:text="CLEAR"
+            android:textColor="@color/text_soft" android:fontFamily="@font/jetbrains_mono" android:textSize="12sp" />
+    </LinearLayout>
+
+    <ScrollView android:id="@+id/alfaConsoleScroll" android:layout_width="match_parent"
+        android:layout_height="0dp" android:layout_weight="1" android:background="@drawable/bg_console"
+        android:padding="10dp" android:layout_marginTop="4dp">
+        <TextView android:id="@+id/alfaConsole" android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:fontFamily="@font/jetbrains_mono" android:textSize="12sp"
+            android:textColor="@color/console_text" android:textIsSelectable="true" />
+    </ScrollView>
+</LinearLayout>
