@@ -75,6 +75,8 @@ pub enum Entry {
     User,
     /// Image perdue / connexion coupée (raison affichée).
     Lost(String),
+    /// Écran récupéré depuis la barre de la session (résultat affiché).
+    Rescued(String),
 }
 
 pub enum Exit {
@@ -84,7 +86,7 @@ pub enum Exit {
 
 /// Commande de secours envoyée au téléphone (opcodes de screenctl).
 #[derive(Clone, Copy, PartialEq)]
-enum Cmd {
+pub(crate) enum Cmd {
     Rescue = 0x06,
     Status = 0x07,
     IaOff = 0x08,
@@ -92,7 +94,7 @@ enum Cmd {
 
 /// Envoie une commande de secours ; renvoie la ligne de réponse.
 /// `Ok(None)` : PC non appairé ; réponse vide : ancien service (commande inconnue).
-fn command(host: &str, port: u16, key: &str, name: &str, cmd: Cmd) -> io::Result<Option<String>> {
+pub(crate) fn command(host: &str, port: u16, key: &str, name: &str, cmd: Cmd) -> io::Result<Option<String>> {
     let Some(mut s) = connect_raw(host, port, key, name, Duration::from_secs(2))? else { return Ok(None) };
     s.set_read_timeout(Some(Duration::from_secs(if cmd == Cmd::Rescue { 10 } else { 4 })))?;
     s.write_all(&[cmd as u8])?;
@@ -251,6 +253,10 @@ impl Home {
                 self.note("retour à l'accueil (F12)");
                 None
             }
+            Entry::Rescued(msg) => {
+                self.note(&msg);
+                None
+            }
             Entry::Start => None,
         };
         // Connexion automatique : au lancement seulement (pas après F12 ni perte d'image).
@@ -399,7 +405,7 @@ struct Layout {
 }
 
 /// Réponse brute du téléphone -> texte lisible.
-fn humanize(l: &str) -> String {
+pub(crate) fn humanize(l: &str) -> String {
     let l = l.trim();
     if let Some(r) = l.strip_prefix("OK ") {
         let mut out = Vec::new();

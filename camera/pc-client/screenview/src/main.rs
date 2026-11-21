@@ -22,6 +22,7 @@
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod bar;
 mod home;
 mod ui;
 
@@ -102,6 +103,7 @@ fn real_main() -> io::Result<()> {
     }
 
     let mut fonts = ui::Fonts::load();
+    let (key2, name2) = (key.clone(), name.clone());
     let mut home = home::Home::new(phone, port, key, name);
     let mut entry = home::Entry::Start;
     loop {
@@ -110,10 +112,12 @@ fn real_main() -> io::Result<()> {
             home::Exit::Connected(s, h) => {
                 log(&format!("connecté à {h}:{port}"));
                 save_last_host(&h);
-                entry = match session(s, mbps) {
+                let link = Link { host: h, port, key: key2.clone(), name: name2.clone() };
+                entry = match session(s, mbps, &mut fonts, &link) {
                     Ok(End::Closed) => return Ok(()),
                     Ok(End::Home) => home::Entry::User,
                     Ok(End::Lost(why)) => home::Entry::Lost(why),
+                    Ok(End::Rescued(msg)) => home::Entry::Rescued(msg),
                     Err(e) => {
                         log(&format!("session : {e}"));
                         home::Entry::Lost(format!("session interrompue : {e}"))
@@ -280,8 +284,18 @@ impl InputCallback for Chars {
     }
 }
 
+/// De quoi envoyer une commande de secours au téléphone pendant la session.
+struct Link {
+    host: String,
+    port: u16,
+    key: String,
+    name: String,
+}
+
 /// Fin d'une session.
 enum End {
+    /// « Récupérer l'écran » depuis la barre : résultat à afficher à l'accueil.
+    Rescued(String),
     /// Fenêtre fermée par l'utilisateur : on quitte.
     Closed,
     /// F12 : retour à l'accueil.
@@ -291,7 +305,7 @@ enum End {
 }
 
 /// Une session d'image.
-fn session(mut s: TcpStream, mbps: u32) -> io::Result<End> {
+fn session(mut s: TcpStream, mbps: u32, fonts: &mut ui::Fonts, link: &Link) -> io::Result<End> {
     s.write_all(&[0x05])?;
     s.write_all(&(mbps.clamp(1, 40) * 1_000_000).to_be_bytes())?;
     let dw = read_u32(&mut s)? as usize;
@@ -344,14 +358,25 @@ fn session(mut s: TcpStream, mbps: u32) -> io::Result<End> {
     }
 
     let opts = WindowOptions { resize: true, ..WindowOptions::default() };
-    let mut win = Window::new("PurpleOps — écran USB", iw, ih, opts).map_err(|e| err(&format!("fenêtre : {e}")))?;
+    // Image du téléphone + barre de commandes en dessous (hors de l'image).
+    let mut win = Window::new("PurpleOps — écran USB", iw, ih + bar::BAR_H, opts)
+        .map_err(|e| err(&format!("fenêtre : {e}")))?;
     set_window_icon(&win);
     win.limit_update_rate(Some(Duration::from_millis(6)));
     let (ch_tx, ch_rx) = mpsc::channel::<char>();
     win.set_input_callback(Box::new(Chars(ch_tx)));
     let mut view = View::new(dw, dh, iw, ih);
-    let mut buf = vec![0u32; iw * ih];
+    let mut pbuf = vec![0u32; iw * ih]; // image du téléphone
+    let mut buf = vec![0u32; iw * (ih + bar::BAR_H)]; // fenêtre entière
     let mut last: Option<Frame> = None;
+    let mut bar_st = bar::BarState::default();
+    let mut bar_drawn: Option<(bar::BarState, usize)> = None;
+    let mut bar_press: Option<bar::BarAct> = None;
+    let mut bar_hold = false;
+    let mut confirm_at: Option<Instant> = None;
+    let mut ia_note_at: Option<Instant> = None;
+    // Résultat d'une commande de secours lancée depuis la barre (fil à part).
+    let cmd_res: Arc<Mutex<Option<(bar::BarAct, String)>>> = Arc::new(Mutex::new(None));
 
     let mut clip = ClipSync::new();
     let mut finger: Option<(u32, u32)> = None;
@@ -359,11 +384,38 @@ fn session(mut s: TcpStream, mbps: u32) -> io::Result<End> {
     let mut title = String::new();
 
     while win.is_open() {
-        if !*alive.lock().unwrap() {
+        // Résultat d'une commande de la barre.
+        if let Some((act, msg)) = cmd_res.lock().unwrap().take() {
+            bar_st.busy = None;
+            match act {
+                bar::BarAct::Rescue => {
+                    *alive.lock().unwrap() = false;
+                    let _ = s.shutdown(std::net::Shutdown::Both);
+                    return Ok(End::Rescued(msg));
+                }
+                _ => {
+                    win.set_title(&format!("PurpleOps — {msg}"));
+                    bar_st.ia_note = Some(if msg.contains("coupé") { "IA coupée".into() } else { "IA : échec".into() });
+                    ia_note_at = Some(Instant::now());
+                }
+            }
+        }
+        if ia_note_at.is_some_and(|t| t.elapsed() > Duration::from_secs(4)) {
+            ia_note_at = None;
+            bar_st.ia_note = None;
+        }
+        if confirm_at.is_some_and(|t| t.elapsed() > Duration::from_secs(4)) {
+            confirm_at = None;
+            bar_st.confirm_ia = false;
+        }
+        // Pendant une récupération, le téléphone coupe lui-même cette session :
+        // on attend sa réponse au lieu de conclure « connexion perdue ».
+        let rescuing = bar_st.busy == Some(bar::BarAct::Rescue);
+        if !*alive.lock().unwrap() && !rescuing {
             return Ok(End::Lost("connexion au téléphone interrompue".into()));
         }
         // Téléphone récent (signal de vie reçu au moins une fois) devenu muet.
-        if pulse.load(Ordering::SeqCst) && rx_seen.lock().unwrap().elapsed() > PHONE_SILENCE {
+        if !rescuing && pulse.load(Ordering::SeqCst) && rx_seen.lock().unwrap().elapsed() > PHONE_SILENCE {
             *alive.lock().unwrap() = false;
             let _ = s.shutdown(std::net::Shutdown::Both);
             return Ok(End::Lost(format!("plus de signal du téléphone depuis {} s", PHONE_SILENCE.as_secs())));
@@ -382,9 +434,64 @@ fn session(mut s: TcpStream, mbps: u32) -> io::Result<End> {
             let _ = ev_tx.send(Ev::Clip(t));
         }
 
-        // Doigt virtuel = bouton gauche : appui, déplacements, relâchement.
-        let pos = win.get_mouse_pos(MouseMode::Clamp).map(|p| view.to_dev(p));
+        // Pointeur : sur l'image (doigt virtuel) ou sur la barre de commandes.
+        let raw = win.get_mouse_pos(MouseMode::Clamp);
+        let in_bar = raw.is_some_and(|p| p.1 >= view.wh as f32);
         let left = win.get_mouse_down(MouseButton::Left);
+        let over = raw.filter(|_| in_bar).and_then(|p| bar::hit(view.ww, (p.0, p.1 - view.wh as f32)));
+        bar_st.hover = over;
+        // Clic sur la barre : appui et relâchement sur le même bouton, jamais envoyé
+        // au téléphone (fonctionne même image figée ou écran noir).
+        // Appui commencé sur la barre : tout le geste lui appartient (même si le
+        // pointeur glisse ensuite sur l'image), il n'est jamais envoyé au téléphone.
+        if left && in_bar && finger.is_none() && !bar_hold {
+            bar_hold = true;
+            bar_press = over;
+        }
+        if !left {
+            bar_hold = false;
+            if let Some(a) = bar_press.take() {
+                if over == Some(a) && bar_st.busy.is_none() {
+                    match a {
+                        bar::BarAct::Home => {
+                            *alive.lock().unwrap() = false;
+                            let _ = s.shutdown(std::net::Shutdown::Both);
+                            return Ok(End::Home);
+                        }
+                        bar::BarAct::IaOff if !bar_st.confirm_ia => {
+                            bar_st.confirm_ia = true;
+                            confirm_at = Some(Instant::now());
+                        }
+                        bar::BarAct::IaOff | bar::BarAct::Rescue => {
+                            bar_st.confirm_ia = false;
+                            confirm_at = None;
+                            bar_st.busy = Some(a);
+                            let cmd = if a == bar::BarAct::Rescue { home::Cmd::Rescue } else { home::Cmd::IaOff };
+                            let (h, port, key, name, res) =
+                                (link.host.clone(), link.port, link.key.clone(), link.name.clone(), cmd_res.clone());
+                            log(if a == bar::BarAct::Rescue { "barre : récupérer l'écran" } else { "barre : couper l'IA" });
+                            thread::spawn(move || {
+                                let what = if a == bar::BarAct::Rescue { "écran récupéré" } else { "pilotage IA" };
+                                let msg = match home::command(&h, port, &key, &name, cmd) {
+                                    Ok(Some(l)) if !l.is_empty() => format!("{what} : {}", home::humanize(&l)),
+                                    Ok(Some(_)) => format!("{what} : téléphone à mettre à jour"),
+                                    Ok(None) => format!("{what} : PC non appairé"),
+                                    Err(e) => format!("{what} : téléphone injoignable ({e})"),
+                                };
+                                log(&msg);
+                                *res.lock().unwrap() = Some((a, msg));
+                            });
+                        }
+                    }
+                }
+            }
+        }
+        // Doigt virtuel = bouton gauche : appui (sur l'image seulement), déplacements
+        // (bornés à l'image), relâchement.
+        let pos = raw
+            .filter(|_| !in_bar || finger.is_some())
+            .map(|p| view.to_dev((p.0, p.1.min(view.wh as f32 - 1.0))));
+        let left = left && !bar_hold;
         match (left, finger, pos) {
             (true, None, Some(p)) => {
                 let _ = ev_tx.send(Ev::Down(p.0, p.1));
@@ -401,17 +508,17 @@ fn session(mut s: TcpStream, mbps: u32) -> io::Result<End> {
             _ => {}
         }
         if let (Some((_, dy)), Some(p)) = (win.get_scroll_wheel(), pos) {
-            if dy != 0.0 && finger.is_none() {
+            if dy != 0.0 && finger.is_none() && !in_bar {
                 let px = (dy.signum() * (dh as f32 / 8.0)) as i32;
                 let _ = ev_tx.send(Ev::Scroll(p.0, p.1, px));
             }
         }
-        let right = win.get_mouse_down(MouseButton::Right);
+        let right = win.get_mouse_down(MouseButton::Right) && !in_bar;
         if right && !prev_r {
             let _ = ev_tx.send(Ev::Key(KEY_BACK, 0));
         }
         prev_r = right;
-        let middle = win.get_mouse_down(MouseButton::Middle);
+        let middle = win.get_mouse_down(MouseButton::Middle) && !in_bar;
         if middle && !prev_m {
             let _ = ev_tx.send(Ev::Key(KEY_HOMEPAGE, 0));
         }
@@ -446,9 +553,13 @@ fn session(mut s: TcpStream, mbps: u32) -> io::Result<End> {
 
         // Nouvelle image ou fenêtre redimensionnée : on recalcule l'affichage.
         let (ww, wh) = win.get_size();
-        let resized = (ww, wh) != (view.ww, view.wh);
+        let ph = wh.saturating_sub(bar::BAR_H).max(1);
+        let resized = (ww, ph) != (view.ww, view.wh);
         if resized {
-            view = View::new(dw, dh, ww, wh);
+            view = View::new(dw, dh, ww, ph);
+            buf = vec![0u32; view.ww * (view.wh + bar::BAR_H)];
+            pbuf = vec![0u32; view.ww * view.wh];
+            bar_drawn = None;
         }
         let fresh = shown.lock().unwrap().take();
         let got = fresh.is_some();
@@ -457,18 +568,24 @@ fn session(mut s: TcpStream, mbps: u32) -> io::Result<End> {
         }
         if resized || got {
             if let Some(f) = last.as_ref() {
-                view.render(f, &mut buf);
+                view.render(f, &mut pbuf);
             }
+            let n = (view.ww * view.wh).min(pbuf.len());
+            buf[..n].copy_from_slice(&pbuf[..n]);
+        }
+        // Barre : redessinée seulement quand son état ou la largeur change.
+        if bar_drawn.as_ref() != Some(&(bar_st.clone(), view.ww)) {
+            let b = bar::draw(fonts, view.ww, &bar_st);
+            let off = view.ww * view.wh;
+            buf[off..off + b.len()].copy_from_slice(&b);
+            bar_drawn = Some((bar_st.clone(), view.ww));
         }
         let st = stats.lock().unwrap().clone();
         if st != title && !st.is_empty() {
             win.set_title(&format!("PurpleOps — {st}"));
             title = st;
         }
-        if buf.len() != view.ww * view.wh {
-            buf.resize(view.ww * view.wh, 0);
-        }
-        win.update_with_buffer(&buf, view.ww, view.wh).map_err(|e| err(&format!("maj fenêtre : {e}")))?;
+        win.update_with_buffer(&buf, view.ww, view.wh + bar::BAR_H).map_err(|e| err(&format!("maj fenêtre : {e}")))?;
     }
     *alive.lock().unwrap() = false;
     let _ = s.shutdown(std::net::Shutdown::Both);
