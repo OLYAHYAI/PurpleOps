@@ -83,6 +83,14 @@ class ChatPanel(
     private var session: MatrixClient.Session? = null
     private var members: Map<String, String> = emptyMap()   // user_id -> nom affiché
     private val messages = ArrayList<MatrixClient.Msg>()
+
+    /**
+     * Fil « collé en bas » : vrai à l'ouverture de l'onglet et tant que
+     * l'opérateur n'a pas remonté le fil. Le défilement est appliqué après
+     * mesure (listeners de layout) : un scroll posté pendant que l'écran est
+     * masqué (peek) ou avant le rendu des bulles serait sans effet.
+     */
+    private var pinBottom = true
     private val seen = HashSet<String>()
     private var since: String? = null
     private var replyTo: MatrixClient.Msg? = null
@@ -107,14 +115,25 @@ class ChatPanel(
         hsIn.setText(MatrixClient.lastHs(ctx))
         userIn.setText(MatrixClient.lastUser(ctx))
         session = try { MatrixClient.session(ctx) } catch (e: Exception) { null }
+        // Nouvelles bulles, ScrollView redimensionnée (onglet affiché, clavier) :
+        // on reste en bas si on y était.
+        val stick = View.OnLayoutChangeListener { _, _, _, _, _, _, _, _, _ -> if (pinBottom) toBottom() }
+        list.addOnLayoutChangeListener(stick)
+        scroll.addOnLayoutChangeListener(stick)
+        scroll.setOnScrollChangeListener { _, _, _, _, _ -> pinBottom = !scroll.canScrollVertically(1) }
         showMode()
+    }
+
+    /** Dernier message visible, sans déplacer le focus (contrairement à fullScroll). */
+    private fun toBottom() {
+        scroll.post { scroll.scrollTo(0, maxOf(0, list.height - (scroll.height - scroll.paddingTop - scroll.paddingBottom))) }
     }
 
     // ------------------------------------------------------------ cycle de vie
 
     fun setVisible(v: Boolean) {
         visible = v
-        if (v) { setUnread(0); start() } else stop()
+        if (v) { pinBottom = true; toBottom(); setUnread(0); start() } else stop()
     }
 
     private fun setUnread(n: Int) { unread = n; onUnread(n) }
@@ -283,14 +302,14 @@ class ChatPanel(
     }
 
     private fun add(incoming: List<MatrixClient.Msg>) {
-        val atBottom = !scroll.canScrollVertically(1)
         var changed = false
         for (m in incoming) if (seen.add(m.eventId)) { messages += m; changed = true }
         if (!changed) return
         messages.sortBy { it.ts }
         while (messages.size > 200) seen.remove(messages.removeAt(0).eventId)
+        if (incoming.any { it.sender == me() }) pinBottom = true
         render()
-        if (atBottom || incoming.any { it.sender == me() }) scroll.post { scroll.fullScroll(View.FOCUS_DOWN) }
+        if (pinBottom) toBottom()
     }
 
     private fun render() {
