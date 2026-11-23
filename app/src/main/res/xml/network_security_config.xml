@@ -6,4 +6,16 @@
     <domain-config cleartextTrafficPermitted="true">
         <domain includeSubdomains="false">127.0.0.1</domain>
     </domain-config>
+    <!-- Services internes du SOC (*.soc.home.arpa, reverse proxy Caddy) : certificats
+         emis par la CA interne step-ca. La racine est embarquee dans l'APK et ne vaut
+         QUE pour ce domaine. Elle porte elle-meme des Name Constraints critiques
+         (soc.home.arpa, 10.10.10.0/24). Les CA ajoutees par l'utilisateur restent
+         ignorees partout. Empreinte SHA-256 de la racine :
+         23:7E:54:33:06:62:AE:6E:F2:C8:BD:C0:59:58:05:DF:65:58:7C:E5:15:07:E9:A0:B0:1A:A3:14:A8:C9:2E:D4 -->
+    <domain-config cleartextTrafficPermitted="false">
+        <domain includeSubdomains="true">soc.home.arpa</domain>
+        <trust-anchors>
+            <certificates src="@raw/soc_root_ca" />
+        </trust-anchors>
+    </domain-config>
 </network-security-config>
