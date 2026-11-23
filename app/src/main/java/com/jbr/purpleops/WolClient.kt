@@ -140,6 +140,34 @@ object WolClient {
         } finally { s.disconnect() }
     }
 
+    /**
+     * Issue d'un réveil, quelle que soit la voie.
+     * [method] : `wol-pi` (direct, SSH Tailscale), `n8n` (n8n a joint wol-pi) ou
+     * `proxmox-api` (n8n a envoyé le paquet par l'API d'un nœud allumé).
+     */
+    data class Outcome(val result: String, val method: String, val detail: String, val direct: String)
+
+    /** Résultats directs de wol-pi qui déclenchent le repli n8n. */
+    private fun needsRelay(r: String) = r.startsWith("ssh_error") || r == "no_link" || r == "error"
+
+    /**
+     * Réveil avec repli automatique : wol-pi d'abord (seule voie qui marche
+     * même si F4BLOX est éteint), puis le webhook n8n si wol-pi est injoignable
+     * ou n'a pas pu envoyer le paquet. Chaque voie est auditée (agent 027).
+     */
+    suspend fun wakeWithFallback(ctx: Context, target: String): Outcome {
+        require(target in TARGETS) { "cible hors liste" }
+        val direct = if (isPaired(ctx)) wake(ctx, target) else "ssh_error: wol-pi non appairé (Réglages)"
+        if (isPaired(ctx)) audit(target, direct)
+        if (!needsRelay(direct) || !WakeRelay.isConfigured(ctx)) {
+            return Outcome(direct.substringBefore(':'), "wol-pi", direct.substringAfter(": ", ""), direct)
+        }
+        val r = WakeRelay.wake(ctx, target)
+        // Même règle Wazuh que le direct (100313, cmd=wake), préfixe relay_ pour distinguer.
+        audit(target, "relay_${r.result}")
+        return Outcome(r.result, r.method, r.detail, direct)
+    }
+
     /** Ligne de journal (agent Wazuh 027), même format que les commandes Kali. */
     private val sysFmt = java.text.SimpleDateFormat("MMM dd HH:mm:ss", java.util.Locale.US)
     suspend fun audit(target: String, result: String) {

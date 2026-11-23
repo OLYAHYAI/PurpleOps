@@ -201,7 +201,7 @@ class HomePanel(
         if (anyNotUp) content.addView(n.button("⏻ Tout allumer", Neon.Kind.PRIMARY) { confirmWake(Cluster.CLUSTER) }.apply {
             layoutParams = n.lp().apply { topMargin = n.dp(2); bottomMargin = n.dp(4) }; minHeight = n.dp(46)
         })
-        content.addView(note("Allumer : wol-pi (audit Wazuh 100721+) · Éteindre : interface Proxmox du nœud (↗)."))
+        content.addView(note("Allumer : wol-pi, sinon repli n8n / API Proxmox (audit Wazuh) · Éteindre : interface Proxmox du nœud (↗)."))
     }
 
     private fun soar(m: Metrics) {
@@ -337,17 +337,17 @@ class HomePanel(
 
     private fun confirmWake(nodes: List<NodeDef>) {
         val ctx = act.applicationContext
-        if (!WolClient.isPaired(ctx)) {
-            ConfirmSheet(act, "wol-pi non appairé", "Ouvrir les Réglages")
+        if (!WolClient.isPaired(ctx) && !WakeRelay.isConfigured(ctx)) {
+            ConfirmSheet(act, "Réveil non configuré", "Ouvrir les Réglages")
                 .kicker("RÉVEIL DES NŒUDS").tone(ConfirmSheet.Tone.ACCENT)
-                .message("Appaire d'abord le téléphone avec wol-pi : Réglages › Réveil des nœuds.")
+                .message("Appaire le téléphone avec wol-pi, ou renseigne la clé du repli n8n : Réglages › wol-pi.")
                 .show { openTab(R.id.nav_settings) }
             return
         }
         val names = nodes.joinToString(", ") { it.pveName }
         ConfirmSheet(act, if (nodes.size > 1) "Tout allumer ?" else "Allumer ${nodes[0].pveName} ?", "⏻ Allumer")
             .kicker("WAKE-ON-LAN · AUDITÉ").tone(ConfirmSheet.Tone.ACCENT)
-            .message("Paquet magique envoyé par wol-pi à : $names. Un nœud déjà allumé répond « déjà allumé » (aucun effet). Chaque demande est auditée dans Wazuh.")
+            .message("Paquet magique envoyé par wol-pi à : $names. Si wol-pi est injoignable, repli automatique par n8n (API Proxmox d'un nœud allumé). Un nœud déjà allumé répond « déjà allumé » (aucun effet). Chaque demande est auditée dans Wazuh.")
             .show { doWake(nodes) }
     }
 
@@ -356,18 +356,24 @@ class HomePanel(
         ui.launch {
             val sent = mutableListOf<NodeDef>()
             for (n in nodes) {
-                wakeStatus[n.target] = "demande envoyée à wol-pi…"; render()
-                val r = WolClient.wake(ctx, n.target)
-                WolClient.audit(n.target, r)
-                wakeStatus[n.target] = when {
-                    r == "sent" -> "paquet magique envoyé, démarrage…"
-                    r == "already_up" -> "déjà allumé"
-                    r == "no_link" -> "pas de lien réseau vers le nœud (${n.via})"
-                    r == "rejected" -> "refusé par wol-pi"
-                    r == "error" -> "échec d'envoi (etherwake)"
-                    else -> r.removePrefix("ssh_error: ")
+                wakeStatus[n.target] = "demande envoyée…"; render()
+                val o = WolClient.wakeWithFallback(ctx, n.target)
+                val par = when (o.method) {
+                    "proxmox-api" -> " (repli : API Proxmox via n8n)"
+                    "n8n" -> " (via n8n)"
+                    else -> ""
                 }
-                if (r == "sent") sent += n
+                wakeStatus[n.target] = when (o.result) {
+                    "sent" -> "paquet magique envoyé$par, démarrage…"
+                    "already_up" -> "déjà allumé"
+                    "no_link" -> "pas de lien réseau vers le nœud (${n.via})"
+                    "rejected" -> "refusé par wol-pi"
+                    "error" -> "échec d'envoi (etherwake)"
+                    "fallback_error" -> "wol-pi puis repli Proxmox en échec : ${o.detail.take(80)}"
+                    "relay_error" -> "wol-pi : ${o.direct.removePrefix("ssh_error: ").take(60)} · repli : ${o.detail}"
+                    else -> (o.detail.ifBlank { o.result }) + par
+                }
+                if (o.result == "sent") sent += n
                 render()
             }
             // Suivi : l'interface web répond-elle (8006 PVE / 8007 PBS) ? 18 × 10 s = 3 min

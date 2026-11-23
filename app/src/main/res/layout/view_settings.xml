@@ -125,6 +125,15 @@
                 android:text="" android:textColor="@color/console_text" android:textSize="11sp" android:fontFamily="@font/jetbrains_mono"
                 android:background="@drawable/bg_console" android:padding="10dp" android:layout_marginTop="10dp"
                 android:textIsSelectable="true" android:visibility="gone" />
+            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Repli n8n si wol-pi est injoignable (clé X-PurpleOps-Key)"
+                android:textColor="@color/muted" android:textSize="12sp" android:paddingTop="10dp" android:paddingBottom="6dp" />
+            <EditText android:id="@+id/cfgWolRelayKey" android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:background="@drawable/bg_input" android:textColor="@color/text" android:textSize="13sp" android:fontFamily="@font/jetbrains_mono"
+                android:hint="vide = repli désactivé" android:textColorHint="@color/faint"
+                android:inputType="textPassword" android:maxLines="1" android:importantForAutofill="no" />
+            <TextView android:id="@+id/cfgWolRelaySave" android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:background="@drawable/btn_ghost" android:gravity="center" android:minHeight="46dp" android:layout_marginTop="10dp"
+                android:text="Enregistrer la clé du repli" android:textStyle="bold" android:textColor="@color/text" android:textSize="13sp" />
             <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Webhook n8n (écran Radio)"
                 android:textColor="@color/muted" android:textSize="12sp" android:paddingTop="10dp" android:paddingBottom="6dp" />
             <EditText android:id="@+id/cfgRadioUrl" android:layout_width="match_parent" android:layout_height="wrap_content"
