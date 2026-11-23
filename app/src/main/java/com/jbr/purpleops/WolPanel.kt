@@ -4,6 +4,7 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.view.View
+import android.widget.EditText
 import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
@@ -31,6 +32,16 @@ class WolPanel(private val act: AppCompatActivity, root: View, private val ui: C
         root.findViewById<View>(R.id.wolTest).setOnClickListener { test() }
         root.findViewById<View>(R.id.wolForget).setOnClickListener { forget() }
         keyLine.setOnClickListener { copy(keyLine.text.toString()) }
+        // Repli n8n : la clé n'est jamais réaffichée, seul son état l'est.
+        val relayKey = root.findViewById<EditText>(R.id.cfgWolRelayKey)
+        root.findViewById<View>(R.id.cfgWolRelaySave).setOnClickListener {
+            val k = relayKey.text.toString().trim()
+            if (k.isNotEmpty() && k.length < 32) { toast("Clé trop courte (32 caractères minimum)"); return@setOnClickListener }
+            WakeRelay.setKey(ctx, k)
+            relayKey.setText("")
+            toast(if (k.isEmpty()) "Repli n8n désactivé" else "Clé du repli enregistrée (chiffrée)")
+            refresh()
+        }
         refresh()
     }
 
@@ -38,6 +49,7 @@ class WolPanel(private val act: AppCompatActivity, root: View, private val ui: C
         status.text = if (WolClient.isPaired(ctx))
             "Appairé · wol-pi ${WolClient.host(ctx)} · clé du téléphone ${WolKey.fingerprint()}"
         else "Non appairé : APPAIRER, puis coller la ligne affichée sur le Pi."
+        status.append(if (WakeRelay.isConfigured(ctx)) "\nRepli n8n : actif (si wol-pi est injoignable)" else "\nRepli n8n : désactivé")
         if (WolClient.isPaired(ctx)) showKeyLine()
     }
 
