@@ -20,11 +20,16 @@ import kotlinx.coroutines.launch
  *     comparer à `ssh-keygen -lf /etc/ssh/ssh_host_ecdsa_key.pub` (sur le Pi) ;
  *  2. génération de la clé du téléphone (Keystore) et affichage de la ligne
  *     `authorized_keys` à coller dans /home/wol/.ssh/authorized_keys.
+ *
+ * La ligne n'est utile qu'au moment de l'appairage : une fois appairé, elle est
+ * repliée derrière « Afficher la ligne authorized_keys » (clé publique, pas un
+ * secret, mais du bruit permanent dans les Réglages).
  */
 class WolPanel(private val act: AppCompatActivity, root: View, private val ui: CoroutineScope) {
 
     private val status: TextView = root.findViewById(R.id.wolStatus)
     private val keyLine: TextView = root.findViewById(R.id.wolKeyLine)
+    private val keyToggle: TextView = root.findViewById(R.id.wolKeyToggle)
     private val ctx: Context get() = act.applicationContext
 
     init {
@@ -32,6 +37,7 @@ class WolPanel(private val act: AppCompatActivity, root: View, private val ui: C
         root.findViewById<View>(R.id.wolTest).setOnClickListener { test() }
         root.findViewById<View>(R.id.wolForget).setOnClickListener { forget() }
         keyLine.setOnClickListener { copy(keyLine.text.toString()) }
+        keyToggle.setOnClickListener { setKeyLineShown(keyLine.visibility != View.VISIBLE) }
         // Repli n8n : la clé n'est jamais réaffichée, seul son état l'est.
         val relayKey = root.findViewById<EditText>(R.id.cfgWolRelayKey)
         root.findViewById<View>(R.id.cfgWolRelaySave).setOnClickListener {
@@ -50,13 +56,18 @@ class WolPanel(private val act: AppCompatActivity, root: View, private val ui: C
             "Appairé · wol-pi ${WolClient.host(ctx)} · clé du téléphone ${WolKey.fingerprint()}"
         else "Non appairé : APPAIRER, puis coller la ligne affichée sur le Pi."
         status.append(if (WakeRelay.isConfigured(ctx)) "\nRepli n8n : actif (si wol-pi est injoignable)" else "\nRepli n8n : désactivé")
-        if (WolClient.isPaired(ctx)) showKeyLine()
+        // Appairé : ligne repliée par défaut, dépliable à la demande.
+        keyToggle.visibility = if (WolClient.isPaired(ctx)) View.VISIBLE else View.GONE
+        if (!WolClient.isPaired(ctx)) setKeyLineShown(false)
     }
 
-    private fun showKeyLine() {
-        val ip = WolClient.phoneTailscaleIp() ?: "100.126.112.23"
-        keyLine.text = WolKey.authorizedKeysLine(ip)
-        keyLine.visibility = View.VISIBLE
+    private fun setKeyLineShown(shown: Boolean) {
+        if (shown) {
+            val ip = WolClient.phoneTailscaleIp() ?: "100.126.112.23"
+            keyLine.text = WolKey.authorizedKeysLine(ip)
+        }
+        keyLine.visibility = if (shown) View.VISIBLE else View.GONE
+        keyToggle.text = if (shown) "Masquer la ligne authorized_keys" else "Afficher la ligne authorized_keys"
     }
 
     private fun pair() {
@@ -72,7 +83,8 @@ class WolPanel(private val act: AppCompatActivity, root: View, private val ui: C
                 .setMessage("$type\n$fp\n\nCompare avec, sur le Pi :\nssh-keygen -lf /etc/ssh/ssh_host_ecdsa_key.pub\n\nNe fais confiance que si l'empreinte est identique.")
                 .setPositiveButton("Faire confiance") { _, _ ->
                     WolClient.pin(ctx, b64)
-                    showKeyLine()
+                    refresh()
+                    setKeyLineShown(true) // nécessaire juste après l'appairage
                     status.text = "Clé épinglée. Colle la ligne ci-dessous dans /home/wol/.ssh/authorized_keys (sur le Pi), puis TESTER. Toucher la ligne = copier."
                     copy(keyLine.text.toString())
                 }
@@ -103,7 +115,7 @@ class WolPanel(private val act: AppCompatActivity, root: View, private val ui: C
     private fun forget() {
         AlertDialog.Builder(act).setTitle("Oublier wol-pi ?")
             .setMessage("Supprime la clé du téléphone et la clé d'hôte épinglée. Pense à retirer la ligne « purpleops-wake » sur le Pi.")
-            .setPositiveButton("Oublier") { _, _ -> WolClient.unpair(ctx); keyLine.visibility = View.GONE; refresh() }
+            .setPositiveButton("Oublier") { _, _ -> WolClient.unpair(ctx); refresh() }
             .setNegativeButton("Annuler", null).show()
     }
 
